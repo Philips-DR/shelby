@@ -1,0 +1,6 @@
+# On a computer with an NVIDIA card: cuBLAS for CUDA 12, the one NVIDIA library faster-whisper's engine
+# (CTranslate2 4.8) loads besides the driver. Whisper then transcribes on the card. The same version
+# PyTorch's CUDA 12.6 build brings (audiobook/requirements-nvidia.txt). About 600 MB.
+# transcribe.load_cublas loads it from here, since nothing else looks in site-packages for it.
+# ./setup and the backend image add it when they find an NVIDIA card.
+nvidia-cublas-cu12==12.6.4.1

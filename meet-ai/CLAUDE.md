@@ -141,6 +141,22 @@ bottleneck is the *decoder*, which runs sequentially one token at a time; distil
 far faster. `float32` measured 0.54×; `int8` measured 0.87×, i.e. no faster than the
 `int8_float32` default, which is why the default keeps activations in float32 for free.
 
+**On an NVIDIA card Whisper runs on it (2026-10-31); everywhere else on the CPU, unchanged.** One function
+loads the model for both doors, `transcribe.load_whisper`. It asks CTranslate2 for a card
+(`get_cuda_device_count`), and uses one only after loading cuBLAS for CUDA 12 (`load_cublas`): CTranslate2
+4.8.2 loads exactly two things on a card, the driver's `libcuda.so.1` and `libcublas.so.12`, by name (read
+from the library itself; no cuDNN), and the pip package that holds cuBLAS (`requirements-nvidia.txt`,
+`nvidia-cublas-cu12==12.6.4.1`, 601 MB) keeps it in site-packages where nothing looks, so it is loaded there
+first and CTranslate2's own load finds it already loaded. A card with no cuBLAS, or one that refuses the
+model, is the CPU with the reason in the log. The compute type is settled per device when the model loads,
+not by the parser: `int8_float32` on the CPU as measured below, `float16` on a card (`float32` on one too old
+for it), and a type named by `--compute-type` or `WHISPER_COMPUTE` is kept on either. It is settled into
+`args.compute_type` because the chunk cache is keyed by it: on the CPU the key is what it always was, so a long
+recording's finished chunks are still reused (a test says so). The log line names the device:
+`Loading model 'distil-large-v3' (GPU, float16)...`. **Not run on a GPU** (there is none here); the CPU path
+was run for real after the change. **Speaker labelling (sherpa-onnx) stays on the CPU**: its GPU build is not
+on PyPI but on its makers' own site, and how much of a diarized run it takes was never measured.
+
 **English-only models do not degrade gracefully — they emit fluent nonsense.** So the script
 *refuses* to run when an English-only model is paired with a non-English `--language`, rather than
 producing a confident wrong transcript.
@@ -253,6 +269,19 @@ against this account on 2026-09-20:
   produces `anthropic.us.anthropic...`. The bug was total, not cosmetic.
 - **Opus 4.6 needs `thinking` set explicitly** — omitting it means no thinking at all, unlike Opus 5
   — and rejects `effort: "xhigh"`, which arrived with 4.7.
+
+**Failures of the model's setup come back in plain words (2026-10-31).** With a refused key the tool door said only "Error executing tool
+generate_notes", and with no model the SDK's own "No AWS region was provided". `check_configured` (client.py) runs first, before any transcript is
+read, and says "No model is set up, so notes cannot be written ... Recording, transcribing and reading a meeting do not need a model";
+`explain_model_error` turns a refused key, a model the key cannot use, a lapsed AWS login and an unreachable network into one plain
+`OperationError` each (matched by the SDK's class names, so client.py stays importable without it); any other failure is raised as it was.
+Run for real against the API with a key Anthropic never issued: "The Anthropic API key was refused, so notes cannot be written. Put a
+working key in .env as ANTHROPIC_API_KEY, then run ./start-docker up."
+
+**First-party default and the one `.env` line (2026-10-31).** The first-party default is `claude-opus-5-5` (was `claude-opus-5`; neither was
+ever run against the API, there being no key), and `SUITE_MODEL` in `.env` (or `MEET_AI_MODEL`, which wins) names another without a
+code change. The notes and minutes call uses `thinking` and `output_config` (effort, JSON schema), which are Anthropic's; a provider
+that is not Anthropic would need an adapter here and in the assistant, and is not built (an Anthropic key is enough for now).
 
 ## Layer 4 is deterministic on purpose
 

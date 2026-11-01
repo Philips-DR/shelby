@@ -168,6 +168,79 @@ def extract_chunk(path: Path, start: float, end: float, dest: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+# The model, and where it runs
+# --------------------------------------------------------------------------
+
+# The compute type each device runs best at, unless --compute-type or
+# WHISPER_COMPUTE names one. The CPU's was measured (CLAUDE.md, "Measured
+# facts"); on an NVIDIA card float16 is CTranslate2's own advice, and float32
+# the fallback for a card too old for it.
+CPU_COMPUTE = "int8_float32"
+GPU_COMPUTE = ("float16", "float32")
+
+# The one library CTranslate2 4.8 loads on an NVIDIA card besides the driver:
+# cuBLAS for CUDA 12, by name. requirements-nvidia.txt installs it as a pip
+# package, inside site-packages where nothing looks, so it is loaded here first;
+# CTranslate2's own load by the same name then finds it already loaded.
+CUBLAS = ("libcublasLt.so.12", "libcublas.so.12")
+
+
+def load_cublas() -> str | None:
+    """Make cuBLAS 12 loadable. None when it is; otherwise why not, in words."""
+    import ctypes
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec("nvidia.cublas")
+    except ModuleNotFoundError:
+        spec = None
+    folders = [Path(p) / "lib" for p in (spec.submodule_search_locations or [])] if spec else []
+    try:
+        for name in CUBLAS:
+            found = next((f / name for f in folders if (f / name).exists()), None)
+            ctypes.CDLL(str(found) if found else name, mode=ctypes.RTLD_GLOBAL)
+    except OSError:
+        return "cuBLAS for CUDA 12 is not installed (./setup installs it where there is an NVIDIA card)"
+    return None
+
+
+def choose_device(ct2, compute_type: str | None) -> tuple[str, str, str]:
+    """Where Whisper runs and how: (device, compute type, what the log says).
+
+    An NVIDIA card CTranslate2 can see, with cuBLAS to hand, is used; anything
+    else is the CPU, exactly as before. A compute type someone named is kept.
+    """
+    if ct2.get_cuda_device_count() > 0:
+        missing = load_cublas()
+        if missing is None:
+            supported = ct2.get_supported_compute_types("cuda")
+            chosen = compute_type or next((c for c in GPU_COMPUTE if c in supported), "float32")
+            return "cuda", chosen, "GPU"
+        return "cpu", compute_type or CPU_COMPUTE, f"CPU: there is an NVIDIA card, but {missing}"
+    return "cpu", compute_type or CPU_COMPUTE, "CPU"
+
+
+def load_whisper(args):
+    """Load the model on the best device there is, and settle args.compute_type
+    to what it runs at: the chunk cache is keyed by it."""
+    import ctranslate2
+    from faster_whisper import WhisperModel
+
+    named = args.compute_type
+    device, args.compute_type, where = choose_device(ctranslate2, named)
+    print(f"Loading model '{args.model}' ({where}, {args.compute_type})...")
+    if device == "cuda":
+        try:
+            return WhisperModel(args.model, device="cuda", compute_type=args.compute_type)
+        except (RuntimeError, ValueError) as exc:  # too little memory, a driver too old
+            args.compute_type = named or CPU_COMPUTE
+            print(f"   Could not use the GPU ({str(exc).splitlines()[0]}); "
+                  f"using the CPU ({args.compute_type}).")
+    return WhisperModel(args.model, device="cpu", compute_type=args.compute_type,
+                        cpu_threads=args.threads)
+
+
+# --------------------------------------------------------------------------
 # Transcription
 # --------------------------------------------------------------------------
 
@@ -544,9 +617,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-f", "--force", action="store_true",
                         help="Re-transcribe even if the .md already exists")
     parser.add_argument("--compute-type",
-                        default=os.environ.get("WHISPER_COMPUTE", "int8_float32"),
-                        help="int8_float32 (default; same speed as int8, more accurate) "
-                             "| int8 | float32")
+                        default=os.environ.get("WHISPER_COMPUTE") or None,
+                        help="Default: int8_float32 on the CPU (same speed as int8, "
+                             "more accurate), float16 on an NVIDIA GPU. "
+                             "Or int8 | float32 | int8_float16")
     parser.add_argument("-p", "--prompt", default=None,
                         help="Vocabulary hint: names, jargon and spellings to expect")
     parser.add_argument("--condition", action="store_true",
@@ -617,11 +691,7 @@ def main() -> int:
         print(f"Drop some audio into {AUDIO_DIR}/ and run this again.")
         return 1
 
-    from faster_whisper import WhisperModel
-
-    print(f"Loading model '{args.model}' (CPU, {args.compute_type})...")
-    model = WhisperModel(args.model, device="cpu", compute_type=args.compute_type,
-                         cpu_threads=args.threads)
+    model = load_whisper(args)
 
     print(f"{len(files)} file(s) to transcribe.\n")
     done = 0

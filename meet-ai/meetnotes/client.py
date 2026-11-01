@@ -34,7 +34,7 @@ BEDROCK_PREFIX = "anthropic."
 # actually answers. Access is granted per-account in the Bedrock console, not in code, so
 # raise this the moment Opus 5 is enabled there.
 DEFAULT_MODELS = {
-    ANTHROPIC: "claude-opus-5",
+    ANTHROPIC: "claude-opus-5-5",  # not run against the API (no key here); SUITE_MODEL in `.env` names another
     BEDROCK: "us.anthropic.claude-opus-4-6-v1",
 }
 
@@ -79,6 +79,51 @@ def resolve_provider(explicit: str | None = None, env: dict | None = None) -> st
         return explicit
     environ = os.environ if env is None else env
     return ANTHROPIC if environ.get("ANTHROPIC_API_KEY") else BEDROCK
+
+
+class NoModel(Exception):
+    """There is nothing to ask: no API key, and no AWS region to reach Bedrock in."""
+
+
+def check_configured(config: ModelConfig, what: str = "notes", env: dict | None = None) -> None:
+    """Say, in plain words and before any transcript is read, that there is no model to write `what` with.
+
+    Without it the first thing anyone saw was the SDK's own complaint ("No AWS region was provided. Set the `aws_region`
+    argument, ..."), which does not say that the real trouble is that no model was set up at all. Recording,
+    transcribing and reading a meeting never reach this: only notes and minutes call a model."""
+    environ = os.environ if env is None else env
+    if config.provider == ANTHROPIC:
+        has = config.api_key or environ.get("ANTHROPIC_API_KEY") or environ.get("ANTHROPIC_AUTH_TOKEN")
+    else:
+        has = config.region or environ.get("AWS_DEFAULT_REGION")
+    if not has:
+        raise NoModel(
+            f"No model is set up, so {what} cannot be written. Set ANTHROPIC_API_KEY (in the suite, put it in .env and run "
+            "./start-docker up). Recording, transcribing and reading a meeting do not need a model."
+        )
+
+
+def explain_model_error(error: BaseException, config: ModelConfig, what: str = "notes") -> str | None:
+    """Plain words for a model call that failed because of the model's setup, or None for any other failure.
+
+    Unexplained, a refused key came back through the tool door as "Error executing tool generate_notes" and nothing else.
+    Matched by the SDK's class names, so this stays importable with the SDK absent."""
+    name, text = type(error).__name__, str(error).lower()
+    if config.provider == ANTHROPIC:
+        if name in ("AuthenticationError", "PermissionDeniedError"):
+            return (f"The Anthropic API key was refused, so {what} cannot be written. Put a working key in .env as "
+                    "ANTHROPIC_API_KEY, then run ./start-docker up.")
+        if name == "NotFoundError":
+            return (f"The model {config.resolved_model} is not available to this API key, so {what} cannot be written. "
+                    "Set SUITE_MODEL in .env to one it can use, then run ./start-docker up.")
+    else:
+        if name in ("NoCredentialsError", "ProfileNotFound", "PartialCredentialsError"):
+            return f"No model is set up, so {what} cannot be written. Set ANTHROPIC_API_KEY (in the suite, put it in .env and run ./start-docker up)."
+        if any(s in text for s in ("expired", "sso", "token", "refresh")):
+            return f"The model's login has expired, so {what} cannot be written. Run ./auth in the suite folder."
+    if name in ("APIConnectionError", "APITimeoutError", "EndpointConnectionError", "ConnectTimeoutError"):
+        return f"Could not reach the model, so {what} cannot be written. Check the network connection and try again."
+    return None
 
 
 def build_client(config: ModelConfig):

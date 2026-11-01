@@ -390,7 +390,7 @@ def main() -> None:
     )
     config = ModelConfig(
         provider=resolve_provider(os.environ.get("MEET_AI_PROVIDER")),
-        model=os.environ.get("MEET_AI_MODEL"),
+        model=os.environ.get("MEET_AI_MODEL") or os.environ.get("SUITE_MODEL") or None,
         region=os.environ.get("AWS_REGION"),
         profile=os.environ.get("AWS_PROFILE"),
         api_key=os.environ.get("ANTHROPIC_API_KEY"),

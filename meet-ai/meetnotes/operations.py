@@ -253,9 +253,14 @@ class NotesResult:
 def generate_notes(timeline_path: Path, config: ModelConfig, out_dir: Path | None = None,
                    lexicon_path: Path | None = None, effort: str = "high") -> NotesResult:
     """Read a timeline, ask a model what happened, keep only the claims it can evidence."""
+    from meetnotes.client import NoModel, check_configured, explain_model_error
     from meetnotes.extract import ModelOutOfRoom, extract_notes
     from meetnotes.verify import verify
 
+    try:
+        check_configured(config, "notes")
+    except NoModel as error:
+        raise OperationError(str(error)) from error
     timeline_path = resolve_timeline(timeline_path)
     timeline, segments, _ = _load_segments(timeline_path, lexicon_path)
     source = timeline.get("source", timeline_path.stem)
@@ -265,6 +270,11 @@ def generate_notes(timeline_path: Path, config: ModelConfig, out_dir: Path | Non
         raw, usage = extract_notes(segments, config, effort=effort)
     except ModelOutOfRoom as error:
         raise OperationError(f"no notes written: {error}") from error
+    except Exception as error:
+        plain = explain_model_error(error, config, "notes")
+        if plain is None:
+            raise
+        raise OperationError(plain) from error
     notes = verify(raw, TimelineIndex(segments))
 
     target_dir = out_dir or timeline_path.parent
@@ -323,9 +333,14 @@ class MinutesResult:
 def generate_minutes(timeline_path: Path, config: ModelConfig, out_dir: Path | None = None,
                      lexicon_path: Path | None = None, effort: str | None = None) -> MinutesResult:
     """Formal minutes, held to the notes' rule: every point must be found in the transcript."""
+    from meetnotes.client import NoModel, check_configured, explain_model_error
     from meetnotes.extract import MINUTES_EFFORT, ModelOutOfRoom, extract_minutes
     from meetnotes.verify import verify_minutes
 
+    try:
+        check_configured(config, "minutes")
+    except NoModel as error:
+        raise OperationError(str(error)) from error
     effort = effort or MINUTES_EFFORT
     timeline_path = resolve_timeline(timeline_path)
     timeline, segments, _ = _load_segments(timeline_path, lexicon_path)
@@ -336,6 +351,11 @@ def generate_minutes(timeline_path: Path, config: ModelConfig, out_dir: Path | N
         raw, usage = extract_minutes(segments, config, effort=effort)
     except ModelOutOfRoom as error:
         raise OperationError(f"no minutes written: {error}") from error
+    except Exception as error:
+        plain = explain_model_error(error, config, "minutes")
+        if plain is None:
+            raise
+        raise OperationError(plain) from error
     minutes = verify_minutes(raw, TimelineIndex(segments))
 
     target_dir = out_dir or timeline_path.parent
@@ -574,7 +594,7 @@ def transcribe_audio(audio_path: Path, out_dir: Path, diarize: bool = False,
     defaults here -- twenty restated defaults would drift from the canonical ones within a
     release.
     """
-    from transcribe import build_parser, timeline_path, transcribe_file
+    from transcribe import build_parser, load_whisper, timeline_path, transcribe_file
 
     duration = probe_audio_duration(audio_path)
     if duration > max_seconds:
@@ -601,16 +621,12 @@ def transcribe_audio(audio_path: Path, out_dir: Path, diarize: bool = False,
     if str(args.chunk_minutes).lower() == "auto":
         args.chunk_minutes = None
 
-    from faster_whisper import WhisperModel
-
     # transcribe.py writes progress and a summary to stdout. For the MCP door stdout is the
     # protocol stream, so it is captured here rather than at each door -- one place to be
     # right, and the CLI gets the same facts from the returned value.
     sink = io.StringIO()
     with contextlib.redirect_stdout(sink):
-        model = WhisperModel(
-            args.model, device="cpu", compute_type=args.compute_type, cpu_threads=args.threads
-        )
+        model = load_whisper(args)
         written = transcribe_file(model, audio_path, args)
 
     if written is None:

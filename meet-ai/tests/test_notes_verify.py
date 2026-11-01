@@ -146,7 +146,7 @@ def test_the_first_party_provider_does_not_touch_the_model_id():
     not an id the first-party API knows."""
     from meetnotes.client import ANTHROPIC, ModelConfig
 
-    assert ModelConfig(provider=ANTHROPIC).resolved_model == "claude-opus-5"
+    assert ModelConfig(provider=ANTHROPIC).resolved_model == "claude-opus-5-5"
     assert ModelConfig(provider=ANTHROPIC, model="claude-haiku-4-5").resolved_model == (
         "claude-haiku-4-5"
     )
