@@ -562,6 +562,15 @@ upload's name, which the page shows and lets you change), and `rename` gives the
 - **Run for real (2026-10-31), through the web app:** a throwaway CV built twice, the first binned from the page, the
   second renamed and binned; Drive's own `info` then said both were in the Trash, the second under its new name.
 
+## Is the login still accepted? `login_status` (2026-10-31)
+
+The same question as mail-ai's, for Google Docs: `checkLogin` (`src/auth/google.ts`) offers the saved refresh token to Google once
+and says `ok`, `dead` (only `invalid_grant`), `missing` (no token file) or `unknown` (Google out of reach, or no OAuth client to ask
+with). It writes nothing and the tool is read-only (tests: the token file byte for byte, and the annotation). It rides on
+`AuthProvider.login?`, so a provider that cannot tell is reported `unknown`, never `ok`. The assistant asks it for Settings and the
+sidebar (`assistant/CLAUDE.md` -> Every login at a glance). Run for real: a token Google never issued -> `dead`, the real token ->
+`ok`, the token file's modification time unchanged.
+
 ## Definition of done for a feature
 
 Fixture added → IR asserted → request snapshot reviewed → live doc built → readback assertions pass → residue

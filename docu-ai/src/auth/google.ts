@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Auth } from 'googleapis'
-import type { AuthProvider } from './types.js'
+import type { AuthProvider, LoginCheck } from './types.js'
 
 /**
  * `drive.file` is deliberately the narrowest scope that works: it grants access only to files this
@@ -187,6 +187,11 @@ export class GoogleOAuthProvider implements AuthProvider {
     return new GoogleOAuthProvider(authConfigFromEnvironment())
   }
 
+  /** Is the saved login still accepted? Asked of Google, written nowhere; see `checkLogin`. */
+  login(): Promise<LoginCheck> {
+    return checkLogin(this.config)
+  }
+
   /**
    * The MCP server holds one provider for its whole life, so a client cached forever meant a fresh
    * `npm run auth` did nothing until the backend restarted: every build kept failing with the dead
@@ -259,6 +264,73 @@ export class GoogleOAuthProvider implements AuthProvider {
     })
     return client
   }
+}
+
+const TOKEN_URL = 'https://oauth2.googleapis.com/token'
+
+/**
+ * Offer Google the refresh token. '' when it is accepted, otherwise the error word Google gave ('invalid_grant'). A
+ * network failure is thrown: that is "could not ask", which is not the same as "refused".
+ */
+async function askGoogle(body: URLSearchParams): Promise<string> {
+  const response = await fetch(TOKEN_URL, { method: 'POST', body, signal: AbortSignal.timeout(15_000) })
+  if (response.ok) return ''
+  try {
+    return String(((await response.json()) as { error?: string }).error ?? response.status)
+  } catch {
+    return String(response.status)
+  }
+}
+
+/**
+ * Ask Google once whether the saved refresh token still works, which every call to Docs does anyway.
+ *
+ * Reads the token file and writes nothing: the answer is thrown away, so a check never rewrites the token, and a
+ * login that is good stays exactly as it was. Only `invalid_grant` is "dead": any other answer says something is
+ * wrong without saying the login is gone, so it is "unknown" with Google's word attached.
+ */
+export async function checkLogin(
+  config: GoogleAuthConfig,
+  ask: (body: URLSearchParams) => Promise<string> = askGoogle,
+): Promise<LoginCheck> {
+  let raw: string
+  try {
+    raw = await readFile(config.tokenPath, 'utf8')
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { state: 'missing', detail: `no token at ${config.tokenPath}` }
+      : { state: 'dead', detail: `unreadable token at ${config.tokenPath}` }
+  }
+  let token: Auth.Credentials | null
+  try {
+    token = JSON.parse(raw) as Auth.Credentials | null
+  } catch {
+    return { state: 'dead', detail: `unreadable token at ${config.tokenPath}` }
+  }
+  if (!token || typeof token !== 'object' || !token.refresh_token) {
+    return { state: 'dead', detail: 'the saved login has no refresh token' }
+  }
+  let secrets: ClientSecrets
+  try {
+    secrets = await loadClientSecrets(config)
+  } catch {
+    return { state: 'unknown', detail: `no OAuth client at ${config.credentialsPath}` }
+  }
+  let answer: string
+  try {
+    answer = await ask(
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: token.refresh_token,
+        client_id: secrets.clientId,
+        client_secret: secrets.clientSecret,
+      }),
+    )
+  } catch (error) {
+    return { state: 'unknown', detail: `could not reach Google: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  if (!answer) return { state: 'ok', detail: '' }
+  return { state: answer === 'invalid_grant' ? 'dead' : 'unknown', detail: answer }
 }
 
 export async function hasCachedToken(path: string = tokenPath()): Promise<boolean> {

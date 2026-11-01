@@ -197,6 +197,25 @@ export function createDocuAiServer(auth: AuthProvider, paths: ServerPaths = {}):
   )
 
   server.registerTool(
+    'login_status',
+    {
+      title: 'Check the Google login',
+      description:
+        'Is the Google Docs login still accepted? Asks Google once whether the saved login still works. `state` is ' +
+        'ok; dead (Google refuses it, so it must be signed in again); missing (never signed in); or unknown (Google ' +
+        'could not be reached, so nothing is known). Changes nothing: no file is written and no document is touched.',
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => {
+      try {
+        return ok({ service: 'Google Docs', ...(auth.login ? await auth.login() : { state: 'unknown', detail: 'this sign-in cannot be checked' }) })
+      } catch (error) {
+        return failed(error)
+      }
+    },
+  )
+
+  server.registerTool(
     'info',
     {
       title: 'What a built document is',
