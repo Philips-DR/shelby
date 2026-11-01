@@ -151,6 +151,20 @@ covers files the way it covers `bcc`.
   first press of Send, was cancelled, opened it from Drafts and discarded it through the gate; the audit log has
   `draft_new` and `discard_draft` and no `send_draft`, Gmail held its 6 drafts again, and a sync found nothing sent.
 
+## Is the login still accepted? (`login_status`, 2026-10-31)
+
+Settings could not say whether Gmail was signed out, only that a call had failed. `check_login` (in `auth.py`) offers Google the
+saved refresh token once, at the token endpoint, which every Gmail call does anyway, and reports `ok`, `dead`, `missing` or
+`unknown`; the `login_status` tool wraps it for the reading login and, when drafting is on, the drafting one (`state` is the worst).
+
+- **It writes nothing.** The answer is thrown away, so a check never rewrites the token and a good login stays exactly as it was.
+  A test compares the file byte for byte after every kind of answer.
+- **Only `invalid_grant` is dead.** Any other word from Google (`invalid_client`, a wrong secret) says something is wrong without
+  saying the login is gone, and signing in again would not fix it, so it is `unknown` with Google's word attached.
+- **Google out of reach is `unknown`, not dead**: no network must not tell anyone to sign in.
+- **Read-only, and a test says so** (`test_only_sync_is_marked_as_writing`): the assistant calls only read-only tools for this.
+- Run for real: a token Google never issued -> `dead` (`invalid_grant`); the real token -> `ok`.
+
 ## Approval previews
 
 `send_draft` and `discard_draft` declare, in MCP's `_meta`, that a caller should show

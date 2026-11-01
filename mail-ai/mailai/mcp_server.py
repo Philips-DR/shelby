@@ -22,7 +22,7 @@ from typing import NotRequired, TypedDict
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from mailai.auth import AuthConfig
+from mailai.auth import AuthConfig, check_login
 from mailai.attach import read_attachment
 from mailai.compose import Attachment, BadAttachment
 from mailai.operations import (
@@ -41,6 +41,9 @@ from mailai.operations import (
 )
 
 VERSION = "0.2.0"
+
+# Worst first, so the state of several logins is the one that most needs a person.
+LOGIN_ORDER = ["dead", "missing", "unknown", "ok"]
 
 
 def approval_preview(preview_tool: str, argument_map: dict[str, str], field: str | None = None) -> dict:
@@ -123,6 +126,28 @@ def create_mail_ai_server(paths: ServerPaths, auth: AuthConfig,
             return as_dict(status(paths.store))
         except (OSError, ValueError) as error:
             return _failed(error)
+
+    @server.tool(
+        name="login_status",
+        title="Check the Gmail login",
+        description=(
+            "Is the Gmail login still accepted? Asks Google once whether each saved login (reading, and drafting "
+            "when it is on) still works. `state` is the worst of them: ok; dead (Google refuses it, so it must be "
+            "signed in again); missing (never signed in); unknown (Google could not be reached, so nothing is known). "
+            "Changes nothing: no file is written and no mail is touched."
+        ),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    def _login_status() -> dict:
+        named = [("Reading", auth)] + ([("Drafting", compose_auth)] if compose_auth is not None else [])
+        checks = [(name, check_login(config)) for name, config in named]
+        worst = min((check.state for _, check in checks), key=LOGIN_ORDER.index)
+        return {
+            "service": "Gmail",
+            "state": worst,
+            "detail": "; ".join(f"{name}: {check.detail or check.state}" for name, check in checks if check.state != "ok"),
+            "logins": [{"name": name, "state": check.state, "detail": check.detail} for name, check in checks],
+        }
 
     @server.tool(
         name="sync",

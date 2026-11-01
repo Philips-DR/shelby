@@ -52,7 +52,7 @@ def call(server, name, **arguments) -> dict:
 
 def test_the_door_advertises_exactly_the_read_path_and_sync(server):
     names = sorted(t.name for t in asyncio.run(server.list_tools()))
-    assert names == ["list_threads", "read_thread", "search", "status", "sync"]
+    assert names == ["list_threads", "login_status", "read_thread", "search", "status", "sync"]
 
 
 def test_without_a_compose_credential_the_door_cannot_send_at_all(server):
@@ -65,7 +65,7 @@ def test_without_a_compose_credential_the_door_cannot_send_at_all(server):
 def test_only_sync_is_marked_as_writing(server):
     read_only = {t.name: t.annotations.read_only_hint for t in asyncio.run(server.list_tools())}
     assert read_only["sync"] is False
-    assert all(read_only[n] is True for n in ("status", "list_threads", "read_thread", "search"))
+    assert all(read_only[n] is True for n in ("status", "list_threads", "read_thread", "search", "login_status"))
 
 
 def test_status_works_offline_with_no_credentials(server):

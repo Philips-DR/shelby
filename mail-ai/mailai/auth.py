@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 # Read-only, and deliberately the narrowest scope that does M0 and M1. Sending needs
 # gmail.send and drafting needs gmail.compose; those get added by the milestone that earns
@@ -141,3 +145,66 @@ def _save(creds, path: Path) -> None:
 
 def has_token(config: AuthConfig) -> bool:
     return config.token_path.exists()
+
+
+# ---- is a saved login still accepted? ------------------------------------------------------------------
+
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+
+@dataclass(frozen=True)
+class LoginCheck:
+    """`state` is ok; dead (Google refuses the login: sign in again); missing (never signed in); or unknown (could
+    not tell: Google was out of reach, or there is no OAuth client to ask with). `detail` is Google's own word or ours."""
+
+    state: str
+    detail: str = ""
+
+
+def _ask_google(body: bytes) -> str:
+    """Offer Google the refresh token. "" when it is accepted, otherwise the error word Google gave ("invalid_grant").
+    A network failure is raised as OSError: that is "could not ask", which is not the same as "refused"."""
+    try:
+        urllib.request.urlopen(TOKEN_URL, body, timeout=15)
+        return ""
+    except urllib.error.HTTPError as error:
+        try:
+            return str(json.load(error).get("error") or error.code)
+        except ValueError:
+            return str(error.code)
+
+
+def check_login(config: AuthConfig, ask: Callable[[bytes], str] = _ask_google) -> LoginCheck:
+    """Ask Google once whether this login's refresh token still works -- which every call to Gmail does anyway.
+
+    Reads the token file and writes nothing: the exchange's answer is thrown away, so a check never rewrites the
+    token, and a login that is good stays exactly as it was. Only `invalid_grant` is "dead": any other answer
+    says something is wrong without saying the login is gone, so it is "unknown" with Google's word attached.
+    """
+    try:
+        token = json.loads(config.token_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return LoginCheck("missing", f"no token at {config.token_path}")
+    except (OSError, ValueError):
+        return LoginCheck("dead", f"unreadable token at {config.token_path}")
+    if not isinstance(token, dict) or not token.get("refresh_token"):
+        return LoginCheck("dead", "the saved login has no refresh token")
+    try:
+        raw = json.loads(config.credentials_path.read_text(encoding="utf-8"))
+        client = raw.get("installed") or raw.get("web") or {}
+    except (OSError, ValueError, AttributeError):
+        client = {}
+    client_id = token.get("client_id") or client.get("client_id", "")
+    if not client_id:
+        return LoginCheck("unknown", f"no OAuth client at {config.credentials_path}")
+    body = urllib.parse.urlencode({
+        "grant_type": "refresh_token", "refresh_token": token["refresh_token"], "client_id": client_id,
+        "client_secret": token.get("client_secret") or client.get("client_secret", ""),
+    }).encode()
+    try:
+        answer = ask(body)
+    except OSError as error:
+        return LoginCheck("unknown", f"could not reach Google: {error}")
+    if not answer:
+        return LoginCheck("ok")
+    return LoginCheck("dead" if answer == "invalid_grant" else "unknown", answer)
