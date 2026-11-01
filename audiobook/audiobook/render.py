@@ -1,6 +1,7 @@
 """Render chapters to audio, caching each chunk so interrupted runs resume where they stopped."""
 
 import hashlib
+import json
 import subprocess
 import time
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ import scipy.io.wavfile
 
 from .chunk import chunk_paragraph
 from .names import chapter_stem, slugify, speed_suffix
-from .plan import Chapter
+from .plan import CHAPTER_PREFIX, Chapter
 from .preview import CHARS_PER_SECOND, RENDER_SPEED
 from .tts import Narrator
 
@@ -22,6 +23,7 @@ PARAGRAPH_PAUSE = 0.6
 HEADING_PAUSE_BEFORE = 0.8
 HEADING_PAUSE_AFTER = 0.5
 TITLE_PAUSE = 1.2
+LABEL_PAUSE = 0.7  # between "Chapter 6" and its title: shorter than the one after the title, so the order is audible
 
 
 def _silence(seconds: float, sample_rate: int) -> np.ndarray:
@@ -104,9 +106,24 @@ class ProgressTracker:
             self.on_progress(Progress(self.chapter, self.chapter_title, self.done, self.total, self.chars_left, left))
 
 
+def announcement(chapter: Chapter) -> list[str]:
+    """What opens a chapter, as the pieces to say one after the other.
+
+    "Chapter 6 Knowing the Source of Your Dreams" said as one phrase ran "six" straight into "knowing" with no
+    breath between them (heard in a finished book, and in Whisper's word times: 6 ended at 1.10 s, Knowing began at
+    1.10). The label and the title are two things, so they are said apart, the label as a sentence of its own so the
+    voice comes down at its end. A chapter with no label ("Opening", "Foreword") is one piece."""
+    text = chapter.announce or chapter.title
+    label = CHAPTER_PREFIX.match(text)
+    title = text[label.end():].strip() if label else ""
+    if not label or not title:
+        return [text]
+    return [label.group().strip(" .:,") + ".", title]
+
+
 def chapter_texts(chapter: Chapter) -> list[str]:
-    """Everything the voice generates for a chapter, in order: the title, then each chunk."""
-    return [chapter.announce or chapter.title] + [chunk for seg in chapter.segments for chunk in chunk_paragraph(seg.text)]
+    """Everything the voice generates for a chapter, in order: what opens it, then each chunk."""
+    return [*announcement(chapter)] + [chunk for seg in chapter.segments for chunk in chunk_paragraph(seg.text)]
 
 
 def render_chapter(chapter: Chapter, render: ChunkRenderer, sample_rate: int, tracker: ProgressTracker) -> np.ndarray:
@@ -116,7 +133,10 @@ def render_chapter(chapter: Chapter, render: ChunkRenderer, sample_rate: int, tr
         tracker.chunk_done(text, time.monotonic() - started)
         return audio
 
-    pieces = [speak(chapter.announce or chapter.title), _silence(TITLE_PAUSE, sample_rate)]
+    pieces = []
+    opening = announcement(chapter)
+    for i, part in enumerate(opening):
+        pieces += [speak(part), _silence(LABEL_PAUSE if i < len(opening) - 1 else TITLE_PAUSE, sample_rate)]
     for seg in chapter.segments:
         is_heading = seg.kind in ("heading", "title")
         if is_heading:
@@ -176,8 +196,13 @@ def render_book(
     speed: float = 1,
     on_progress: Callable[[Progress], None] | None = None,
     on_chapter_done: Callable[[Path, float], None] | None = None,
+    labels: dict | None = None,
 ) -> Path | None:
-    """Render chapters to MP3s (and optionally one M4B). Returns the M4B path if built."""
+    """Render chapters to MP3s (and optionally one M4B). Returns the M4B path if built.
+
+    Beside each MP3 goes `<its name>.json`: the chapter's number, title and book, the speed, `labels` (voice, PDF,
+    author), and exactly the text it speaks, written down as it was spoken. That is what the suite keeps with the
+    audio (keeping.py); the plan can change after (corrections, a better reading), the MP3 does not."""
     out_dir.mkdir(parents=True, exist_ok=True)
     render = ChunkRenderer(narrator)
     sr = narrator.sample_rate
@@ -192,8 +217,13 @@ def render_book(
         scipy.io.wavfile.write(wav, sr, _to_int16(audio))
         mp3 = out_dir / f"{stem}.mp3"
         encode_mp3(wav, mp3, chapter.title, album, number, speed)
+        seconds = len(audio) / sr / speed
+        spoken = "\n\n".join([*announcement(chapter), *(seg.text for seg in chapter.segments)])
+        mp3.with_suffix(".json").write_text(json.dumps(
+            {"number": number, "title": chapter.title, "album": album, "speed": speed, "seconds": round(seconds, 1),
+             **(labels or {}), "text": spoken}, ensure_ascii=False, indent=1), encoding="utf-8")
         if on_chapter_done:
-            on_chapter_done(mp3, len(audio) / sr / speed)
+            on_chapter_done(mp3, seconds)
         if m4b:
             wavs.append(wav)  # joined into the M4B at the end
         else:

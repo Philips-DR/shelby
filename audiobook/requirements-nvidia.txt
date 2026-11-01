@@ -1,0 +1,11 @@
+# On a computer with an NVIDIA card: PyTorch's CUDA build in place of requirements.txt's CPU-only torch
+# and torchvision, the same versions. CUDA 12.6 because it runs on the widest range of NVIDIA drivers
+# (any that runs CUDA 12) and cards (CUDA 13 dropped the older ones). Pocket TTS then speaks on the card,
+# and Docling reads books on it (it picks a GPU by itself). 3.65 GB to download where the CPU build is
+# 0.2 GB (measured 2026-10-31: torch, torchvision, triton and NVIDIA's libraries).
+# Never installed by hand: ./install-deps leaves requirements.txt's two CPU pins out and adds these;
+# ./setup and the backend image call it when they find an NVIDIA card.
+--extra-index-url https://download.pytorch.org/whl/cu126
+
+torch==2.14.0+cu126
+torchvision==0.29.0+cu126

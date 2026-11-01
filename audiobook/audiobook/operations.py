@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import background
-from .names import chapter_audio, title_from_file_name
+from .names import chapter_audio, chapter_stem, title_from_file_name
 from .plan import BookPlan, build_plan
 from .preview import RENDER_SPEED, chapter_label, format_duration, render_preview, speech_seconds
 from .speech import parse_corrections
@@ -96,6 +96,7 @@ def render_pdf(
     return render_book(
         [(n, plan.chapters[n - 1]) for n in selected], narrator, out_dir or output_dir(pdf), plan.title, m4b, speed,
         on_progress=on_progress, on_chapter_done=on_chapter_done,
+        labels={"voice": voice, "pdf": str(pdf), **({"author": plan.author} if plan.author else {})},
     )
 
 
@@ -167,7 +168,9 @@ def book_overview(pdf: Path) -> dict:
     return {
         "pdf": str(pdf), "analysed": True, "title": plan.title, "author": plan.author,
         "chapters": [
-            {"number": i, "label": chapter_label(i, c), "appendix": c.appendix,
+            # `stem`: how this chapter's audio is named, before the speed (names.chapter_stem). Audio the suite now
+            # keeps instead of this folder is matched to the chapter by it, as `audio` here is.
+            {"number": i, "label": chapter_label(i, c), "appendix": c.appendix, "stem": chapter_stem(i, c.title),
              "words": sum(len(s.text.split()) for s in c.segments),
              "speech": format_duration(speech_seconds(c.spoken_chars)),
              "audio": audio(i, c)}

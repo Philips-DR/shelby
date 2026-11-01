@@ -252,6 +252,11 @@ def _all(jobs_dir: Path) -> list[Job]:
     return [j for j in (_load(p) for p in sorted(folder.glob("*.json"))) if j]
 
 
+def history(jobs_dir: Path) -> list[Job]:
+    """Every job, oldest first, as last saved (not refreshed: a finished one does not change)."""
+    return _all(jobs_dir)
+
+
 def current(jobs_dir: Path) -> Job | None:
     """The job that is still running, refreshed, if any."""
     for job in reversed(_all(jobs_dir)):

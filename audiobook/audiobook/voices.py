@@ -16,7 +16,7 @@ from typing import Callable
 
 import numpy as np
 
-from .tts import PRESETS, VOICES_DIR, clone, load_model, prepare_reference
+from .tts import PRESETS, VOICES_DIR, clone, load_model, prepare_reference, to_array
 
 MAX_PROMPT_S = 30.0
 MIN_PROMPT_S = 15.0
@@ -175,7 +175,7 @@ def add_voice(
             tmp = VOICES_DIR / f".{name}-candidate.wav"
             prepare_reference(clip, tmp, a, b)
             state = clone(tmp)
-            spoken = [_to16k(model.generate_audio(state, t).numpy(), model.sample_rate) for t in SCORING_TEXTS]
+            spoken = [_to16k(to_array(model.generate_audio(state, t)), model.sample_rate) for t in SCORING_TEXTS]
             score = float(np.mean([float(target @ sim.embed(s)) for s in spoken]))
             tmp.unlink()
             result.candidates.append((a, b, score))

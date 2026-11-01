@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Install audiobook's packages into a Python environment, for the CPU or for an NVIDIA card:
+#
+#   ./install-deps <python> [cpu|nvidia]
+#
+# cpu (the default) is requirements.txt as it stands: PyTorch's CPU-only build. nvidia is the same list with
+# PyTorch's CUDA build (requirements-nvidia.txt) in place of its torch and torchvision. ./setup and the
+# backend image both install through this, so the two cannot drift.
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+py="$1"; gpu="${2:-cpu}"
+
+case "$gpu" in
+  cpu)
+    "$py" -m pip install -q -r "$DIR/requirements.txt" -r "$DIR/requirements-dev.txt" ;;
+  nvidia)
+    # The two lists pin torch and torchvision to different builds of one version, which pip cannot hold at
+    # once, so the CPU pins are left out rather than overridden.
+    without="$(mktemp)"; trap 'rm -f "$without"' EXIT
+    grep -v -E '^(torch|torchvision)==' "$DIR/requirements.txt" > "$without"
+    "$py" -m pip install -q -r "$without" -r "$DIR/requirements-nvidia.txt" -r "$DIR/requirements-dev.txt" ;;
+  *)
+    echo "install-deps: expected cpu or nvidia, not '$gpu'" >&2; exit 2 ;;
+esac
+"$py" -m pip check

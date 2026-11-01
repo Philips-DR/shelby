@@ -31,13 +31,41 @@ def prepare_reference(src: Path, dest: Path, start: float | None = None, end: fl
     )
 
 
+def place(model, torch) -> str:
+    """Put the model on an NVIDIA GPU when PyTorch can use one, else leave it on the processor; say which.
+
+    PyTorch's CPU build (the usual install) never sees a GPU: ./setup and the image install its CUDA
+    build only where an NVIDIA card is. A card that cannot take the model (too little memory, a driver
+    too old) costs nothing: it speaks on the processor, as before.
+    """
+    if not torch.cuda.is_available():
+        print("Speaking on the processor.")
+        return "cpu"
+    try:
+        model.to("cuda")
+    except RuntimeError as error:
+        model.to("cpu")
+        print(f"Could not use the GPU ({str(error).splitlines()[0]}); speaking on the processor.")
+        return "cpu"
+    print(f"Speaking on the GPU: {torch.cuda.get_device_name(0)}.")
+    return "cuda"
+
+
 @cache
 def load_model():
     """Load Pocket TTS once per process (a render and a voice test each run in one process)."""
+    import torch
     from pocket_tts import TTSModel
 
     print("Loading Pocket TTS...")
-    return TTSModel.load_model()
+    model = TTSModel.load_model()
+    place(model, torch)
+    return model
+
+
+def to_array(audio) -> np.ndarray:
+    """Pocket TTS returns audio on the model's device; numpy reads it only from the processor's memory."""
+    return audio.cpu().numpy()
 
 
 def clone(reference_wav: Path, out: Path | None = None):
@@ -86,4 +114,4 @@ class Narrator:
         self.state = clone(reference, cached)
 
     def synthesize(self, text: str) -> np.ndarray:
-        return self.model.generate_audio(self.state, text).numpy()
+        return to_array(self.model.generate_audio(self.state, text))

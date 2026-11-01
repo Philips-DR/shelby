@@ -18,7 +18,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from . import operations
+from . import keeping, operations
 from .background import ROOT, JobError
 
 VERSION = "0.1.0"
@@ -302,6 +302,42 @@ def create_audiobook_server(paths: ServerPaths) -> MCPServer:
     def _job_status(job_id: str | None = None) -> dict:
         try:
             return {"job": operations.job_status(paths.jobs_dir, job_id)}
+        except FAILURES as error:
+            return _failed(error)
+
+    # The suite's two agreed names (its layer 1b): what is worth keeping, and letting go of it once kept. Neither is
+    # for a conversation; keeping.py says what each hands over.
+    @server.tool(
+        name="inventory",
+        title="What there is to keep",
+        description=(
+            "For the suite, not for answering a person: every finished file and record this tool holds that is "
+            "worth keeping -- chapter audio with the exact text it speaks, whole-book M4Bs, voice samples, voices, "
+            "corrections, finished jobs -- each labelled (book, chapter number and title, speed, voice). The suite "
+            "files them in its own store. To say what has been rendered, ask the suite what it keeps. Reads only."
+        ),
+        annotations=READ,
+    )
+    def _inventory() -> dict:
+        try:
+            return keeping.inventory(paths.jobs_dir)
+        except FAILURES as error:
+            return _failed(error)
+
+    @server.tool(
+        name="release",
+        title="Let go of audio the suite has kept",
+        description=(
+            "For the suite only, never because a person asked: delete this tool's working copies of finished audio "
+            "the suite has already filed, each named by its path and the SHA-256 of the copy filed. Anything whose "
+            "hash differs, or that is not finished audio in this tool's output folder, is kept and said so. To "
+            "delete a book's audio, a person uses the Audiobooks page."
+        ),
+        annotations=DESTROY,
+    )
+    def _release(files: list[dict]) -> dict:
+        try:
+            return keeping.release(files)
         except FAILURES as error:
             return _failed(error)
 

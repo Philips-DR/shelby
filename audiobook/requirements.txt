@@ -1,6 +1,7 @@
 # audiobook's own environment (audiobook/.venv), not the suite's shared one: it needs torch, Docling
 # and Pocket TTS, ~1.9 GB that nothing else here uses, and torch must be the CPU-only build from
 # PyTorch's own index (this machine has no usable GPU; PyPI's default is a multi-GB CUDA build).
+# A computer with an NVIDIA card gets the CUDA build instead: requirements-nvidia.txt, through ./install-deps.
 # Every version below is the set the tests and a real render passed with -- see CLAUDE.md
 # ("Environment") before changing one.
 --extra-index-url https://download.pytorch.org/whl/cpu

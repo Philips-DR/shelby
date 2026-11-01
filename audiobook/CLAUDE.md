@@ -30,7 +30,22 @@ TypeScript rewrite; the interface is TypeScript already, in the suite's `../web`
 
 - CPU-only in practice: Intel i5/i7 Whiskey Lake-U (8 threads), ~14 GB RAM.
 - GPUs present are an Intel UHD 620 and an AMD Radeon PRO WX 3200 (Polaris, 4 GB) — neither is
-  usable for PyTorch acceleration (no CUDA, Polaris is not supported by ROCm). Assume `device="cpu"`.
+  usable for PyTorch acceleration (no CUDA, Polaris is not supported by ROCm; checked again 2026-10-31: the
+  driver does not even list the AMD card for compute, only the processor). This machine runs on the CPU.
+- **On a computer with an NVIDIA card (2026-10-31)** the same code speaks on it: `tts.place` moves the model
+  to `cuda` when `torch.cuda.is_available()`, says which in the log ("Speaking on the GPU: …" / "Speaking on
+  the processor."), and falls back to the processor if the card refuses the model. Audio comes back on the
+  model's device, so it is read through `tts.to_array` (`.cpu()` first), never `.numpy()` directly. Voices
+  loaded from `.safetensors` land on the model's device by themselves (Pocket TTS's `_import_model_state`),
+  and saving one from a GPU works (safetensors copies to the processor first). Docling picks the card by
+  itself (`AcceleratorOptions.device = "auto"`). The CPU-only PyTorch never sees a card, so the install
+  decides: `./install-deps <python> nvidia` installs `requirements.txt` with its two CPU pins left out and
+  `requirements-nvidia.txt` (PyTorch 2.14.0 for CUDA 12.6: any driver that runs CUDA 12, and the older cards
+  CUDA 13 dropped) in their place; `./setup` and the backend image call it when they find an NVIDIA card.
+  3.65 GB to download against the CPU build's 0.2 GB. **Not run on a GPU** (there is none here): the
+  resolve of that set was checked (`pip install --dry-run`, 141 packages, `pip check` clean), and the CPU
+  path was run for real after the change (a sentence in `abigail`, 1.09× real time, Whisper read it back
+  word for word).
 - A full book is hours of audio, so the engine must run at or above real-time on CPU.
 - Python 3.14 in **this tool's own venv**, `.venv/` — never the suite's shared one. `./setup` at the
   suite's top builds it from `requirements.txt` (every version pinned, with PyTorch's CPU index
@@ -118,6 +133,23 @@ as clearest.
   generation gave exact pauses but duller consonants; shaping pauses inside multi-sentence chunks
   kept clarity but was reverted along with levelling.
 
+## How a chapter opens (2026-10-31)
+
+"Chapter 6 Knowing the Source of Your Dreams" was said as one phrase, so "six" ran straight into "knowing" (the user heard it in a
+finished book, and Whisper's word times on chapter 6 agreed: `6` ended at 1.10 s, `Knowing` began at 1.10). `announcement` in
+`render.py` now splits a label off the front of the spoken title (`plan.CHAPTER_PREFIX`: Chapter, Part or Book with a number, a
+roman numeral or a number word) and says them apart: the label as a sentence of its own ("Chapter 6."), `LABEL_PAUSE` (0.7 s) of
+silence, then the title, then the usual `TITLE_PAUSE`. A chapter with no label ("Opening", "Foreword") is one piece, as before.
+
+- **Checked the way speech.py asks (the real abigail voice, then Whisper and silence detection):** the old way had no silence
+  between the two (Whisper: gap 0.00 s); the new way has about one second of silence between "Chapter 6." and the title (0.7 s
+  of ours at 0.95x, plus the voice's own tail), then the same pause after the title. **Not listened to by ear** by whoever wrote
+  this: the user's ear is the last check.
+- **A finished book keeps its old openings until it is rendered again.** The chunk cache is keyed on text, so the body of every
+  chapter is already cached and a re-render costs only the new short title chunks and the encode.
+- `chapter_texts` (what the progress count and the estimate are built from) uses the same pieces, so the count is exactly what the
+  voice is asked for; a test says so.
+
 ## Code layout
 
 - `audiobook/extract.py` — Docling conversion, cached in `.cache/docling/<pdf sha256>.json`; PDFs
@@ -141,7 +173,7 @@ as clearest.
   `list_voices`; metadata in `voices/NAME.json`.
 - `audiobook/__main__.py` — CLI and `.env` loading.
 - `audiobook/chunk.py` — sentence chunks ≤400 chars. `audiobook/tts.py` — model loaded once per
-  process, `Narrator`, `resolve_voice`. `audiobook/render.py` — speaks a plan `Chapter` with pauses,
+  process and placed on a GPU when there is one (`place`), `Narrator`, `resolve_voice`, `to_array`. `audiobook/render.py` — speaks a plan `Chapter` with pauses,
   caches each chunk in `.cache/audio/<voice id>/<text hash>.npy`, reports `Progress` (with time
   left) through a callback, encodes MP3/M4B.
 - `tests/` — rule unit tests; golden `tests/golden/paper.preview.md` from
@@ -241,9 +273,10 @@ How it was joined to the suite, and the rules that came out of running it for re
   PDF's content hash, so a re-uploaded copy of a book is already "read".
 - **Everything that can be wrong is checked before a job exists** (`operations.start_render`: analysed,
   voice, speed, chapters): a render failing in its first second is a job nobody should have to poll.
-- **The gate is the tools' own annotations.** Seven tools only read (`list_*`, `describe_audiobook`,
-  `preview_book`, `read_chapter`, `get_corrections`, `job_status`); the seven that start work, write a file or
-  delete one are not read-only, so chat asks first and `tests/test_mcp_door.py` pins the split.
+- **The gate is the tools' own annotations.** Eight tools only read (`list_*`, `describe_audiobook`,
+  `preview_book`, `read_chapter`, `get_corrections`, `job_status`, `inventory`); the eight that start work, write a
+  file or delete one (`release` among them) are not read-only, so chat asks first and `tests/test_mcp_door.py` pins
+  the split.
 - **Deleting a book's audio (2026-10-30), `delete_audiobook`.** It removes `output/<book>/` and nothing else.
   Not the PDF (the suite's assistant owns uploads), not a voice, and **not the two shared caches**: the spoken
   chunks in `.cache/audio/<voice id>/` are keyed by voice and text, so they belong to no one book, and Docling's
@@ -289,8 +322,23 @@ How it was joined to the suite, and the rules that came out of running it for re
   `is_our_job` now scans `/proc` for group members that name the target and the marker or
   `python -m audiobook`; `cancel` waits for the group to empty, not for one pid.
   A render stopped this way loses nothing (chunk cache); reading a book and cloning start over.
-- **Audio is served by the assistant, from `output/` only** (`tools.yaml`: `files: [output]`; see
+- **Audio is served by the assistant, from `output/` only** (`tools.yaml`: `files: [output, voices, voice]`; see
   `assistant/CLAUDE.md`). Nothing here knows about HTTP.
+- **In the suite, finished work is handed over and let go (`keeping.py`, 2026-11-01; the suite's layer 1b, phase B).**
+  `inventory` (read-only) lists what is worth keeping, labelled: each chapter MP3 (book, number, title, album, speed,
+  and since 2026-11-01 voice, PDF, length and **the exact text it speaks**, which `render_book` writes beside it as
+  `<mp3 stem>.json` before announcing the chapter finished), each M4B, each voice sample, audio left loose at the top
+  of `output/` (four early tests on the real data), each book's title and author (`book`, from `book_names`: `plan.json`,
+  else the file name; **needed because once a book's audio is kept the tool no longer lists it, and a chapter's own tag
+  can be from an early wrong reading: Dreams and Visions showed as "Praise for" until the page read the book**), each
+  voice (record, state, sample, source recording), each book's corrections, each finished job (its log with progress lines collapsed: read as bytes, since reading as text turns
+  every `\r` into a line). The suite files them and calls `release`, which deletes only finished audio in `output/`
+  whose SHA-256 is the filed copy's (and the chapter's `.json`). **Voices, corrections and jobs are never released**:
+  a render needs the first two, `job_status` reads the third. A render still running hands over only the chapters its
+  log says are finished. Alone, none of this runs and `output/` is as it always was. A chapter rendered before the
+  text was written down has its MP3's own tags (title, album, track) and no text: today's plan may not be what it says.
+  `book_overview` gives each chapter its `stem` (`names.chapter_stem`), which the page matches kept audio by, as
+  `chapter_audio` matches files here.
 - **Verified for real (2026-10-10):** a voice sample in `abigail` from the new venv, transcribed with
   Whisper, matched its text 100%; a chapter rendered to MP3 + M4B (chapter marker present) with live
   percent and time left; the same through chat (preview, approval card, render) and through the
