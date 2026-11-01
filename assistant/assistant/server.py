@@ -42,10 +42,14 @@ from assistant.auth import (
 from assistant.config import load_tool_servers, model_config_from_environment
 from assistant.db import Database
 from assistant.session import ApprovalRequest, allow_gate, execute, run_turn
+from assistant import files, texts
 from assistant import uploads as up
+from assistant.collect import INVENTORY, RELEASE, Collector
+from assistant.records import kept_tools, records_for, shown
 from assistant.documents import document_tools
 from assistant.setup import context_for, current_lexicon, lexicon_path_for, prepare, stores_for
-from assistant.status import model_status, network_status, tools_status
+from assistant.logins import Logins
+from assistant.status import model_failure, network_status, tools_status
 from assistant.tools import RemoteTool, ToolRegistry
 from assistant.schedule import run_every
 from assistant.watchers import watch, watch_login
@@ -71,6 +75,9 @@ NOTE_LIMIT = 400
 # only these kinds of file are ever sent.
 MEDIA_TYPES = {".mp3": "audio/mpeg", ".m4b": "audio/mp4", ".m4a": "audio/mp4", ".wav": "audio/wav",
                ".flac": "audio/flac", ".ogg": "audio/ogg", ".opus": "audio/ogg"}
+# What a stored upload is sent as, by id (/api/files/{id}). Anything else goes as plain bytes to download.
+STORED_TYPES = {**MEDIA_TYPES, ".pdf": "application/pdf", ".webm": "audio/webm", ".mp4": "audio/mp4",
+                ".aac": "audio/aac"}
 
 
 def approval_view(request: ApprovalRequest) -> dict[str, Any]:
@@ -128,6 +135,8 @@ class Hub:
         self.subscribers: set[asyncio.Queue] = set()
         self.history: deque[dict[str, Any]] = deque(maxlen=HISTORY_LIMIT)
         self.seq = 0
+        # What every login looked like at the last check; Settings, the sidebar and the watcher all read it.
+        self.logins = Logins(config, registry, self.emit)
 
     @property
     def busy(self) -> bool:
@@ -184,7 +193,12 @@ class Hub:
             # every later turn. Roll the conversation back to before it, and keep the notes.
             del self.messages[checkpoint:]
             self.notes = held + self.notes
-            await self.emit({"type": "turn_error", "error": str(error)[:500]})
+            plain = model_failure(error, self.config)
+            if plain:
+                # The model is the trouble, not the request: say so, point at Settings, and keep the raw error.
+                await self.emit({"type": "turn_error", "error": plain, "detail": str(error)[:500], "settings": True})
+            else:
+                await self.emit({"type": "turn_error", "error": str(error)[:500]})
 
     async def clear_chat(self) -> int:
         """Forget the conversation: what the model remembers of it and what Chat shows. Returns how many
@@ -237,8 +251,11 @@ class ApprovalAnswer(BaseModel):
 
 
 class UploadDeletion(BaseModel):
-    kind: str
-    name: str
+    id: str
+
+
+class RecordDeletion(BaseModel):
+    ids: list[str]
 
 
 class ActionRequest(BaseModel):
@@ -256,7 +273,9 @@ def create_app(
     token: str | None = None,
     registry_factory: Callable[[list[Any]], ToolRegistry] | None = None,
     watch_jobs: bool = True,
-    uploads_path: Path | None = None,
+    files_path: Path | None = None,
+    texts_path: Path | None = None,
+    legacy_uploads: Path | None = None,
     origins: tuple[str, ...] = DEFAULT_ORIGINS,
     hosts: frozenset[str] = frozenset(),
     on_ready: Callable[[], None] | None = None,
@@ -266,7 +285,14 @@ def create_app(
     allowed_emails: frozenset[str] = frozenset(),
     database_url: str | None = None,
 ) -> FastAPI:
-    uploads_root = uploads_path or ROOT / "uploads"
+    # Every file the suite keeps (files.py): <root>/<id>/<name>, each recorded in the `files` table, or in
+    # index.json there with no database. `legacy_uploads` is the old uploads folder, copied in once on start.
+    files_root = (files_path or ROOT / "files").resolve()
+    # Where stored markdown is lent to a tool for one call (texts.py). Everything a lend makes there is removed,
+    # so it must not be, or hold, the file store.
+    texts_root = (texts_path or ROOT / "texts").resolve()
+    if texts_root.is_relative_to(files_root) or files_root.is_relative_to(texts_root):
+        raise ValueError(f"the texts folder ({texts_root}) and the file store ({files_root}) must be apart")
     token = token or secrets.token_urlsafe(24)
     holder: dict[str, Hub] = {}
     # With a database URL, memory, the audit log and sign-in sessions live in PostgreSQL and the two
@@ -274,6 +300,11 @@ def create_app(
     database = (Database(database_url, legacy_memory=memory_path, legacy_audit=audit_path)
                 if database_url else None)
     memory, audit = stores_for(database, memory_path, audit_path)
+    file_index = files.index_for(database, files_root)
+    # What tools made that the suite keeps, under the tools' own labels (records.py, collect.py).
+    records = records_for(database, files_root)
+    lender = texts.Lender(texts_root, file_index)
+    doc_batches = up.DocBatches()
     lexicon_path = lexicon_path_for(memory_path)
 
     @asynccontextmanager
@@ -281,20 +312,33 @@ def create_app(
         config = model_config_from_environment(provider, model)
         if database is not None:
             await database.connect()
+        if legacy_uploads is not None:
+            app.state.files_imported = await up.import_old_uploads(file_index, files_root, legacy_uploads)
+        lender.clear()
         local_tools, context = await prepare(memory, lexicon_path)
-        local_tools = [*local_tools, *document_tools(uploads_root)]
+        local_tools = [*local_tools, *document_tools(files_root, texts_root, file_index),
+                       *kept_tools(records, file_index)]
         registry = (registry_factory(local_tools) if registry_factory
                     else ToolRegistry(load_tool_servers(tools_path), local=local_tools))
+        registry.lend = lender.lend
         # Held open for the life of the server: the tools stay running instead of being
         # relaunched for every request.
         await registry.__aenter__()
         holder["hub"] = Hub(registry, config, context, audit,
                             refresh_context=lambda: context_for(memory, lexicon_path))
         app.state.hub = holder["hub"]
+        # What a tool made is taken into the store and the database: after a call that changed something, when
+        # the watcher sees a job finish, and now, which the first time is the taking-in of what is already there.
+        # Never after the tool's own inventory or release, which would only ask again.
+        collector = Collector(registry, file_index, records, files_root, emit=holder["hub"].emit)
+        registry.changed = lambda tool: None if tool.name in (INVENTORY, RELEASE) else collector.soon(tool.server)
+        app.state.collector = collector
+        for server in collector.offering():
+            collector.soon(server)
         # Tells the browser when a long job finishes, so nobody has to keep asking.
         watchers = [
-            asyncio.create_task(watch(registry, holder["hub"].emit)),
-            asyncio.create_task(watch_login(config, holder["hub"].emit)),
+            asyncio.create_task(watch(registry, holder["hub"].emit, on_change=collector.soon)),
+            asyncio.create_task(watch_login(holder["hub"].logins)),
         ] if watch_jobs else []
         # What tools.yaml says to run on a timer (mail's sync), whether or not a page is open.
         watchers += [asyncio.create_task(run_every(registry, audit, holder["hub"].emit, server, name, seconds))
@@ -308,6 +352,7 @@ def create_app(
         finally:
             for task in watchers:
                 task.cancel()
+            await collector.stop()
             await registry.__aexit__(None, None, None)
             if database is not None:
                 await database.close()
@@ -315,6 +360,9 @@ def create_app(
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.token = token
     app.state.database = database
+    app.state.files_root = files_root
+    app.state.texts_root = texts_root
+    app.state.files_imported = {}
 
     def hub() -> Hub:
         return holder["hub"]
@@ -565,24 +613,26 @@ def create_app(
     @app.get("/api/status")
     async def status(live: bool = False) -> dict[str, Any]:
         """What Settings shows. Tools are read from what is already known; the network and
-        the model login are only checked when asked (live=true), since each costs a round
-        trip."""
+        every login are only checked when asked (live=true), since each costs a round trip."""
         h = hub()
+        if live:
+            network, _checked = await asyncio.gather(asyncio.to_thread(network_status), h.logins.check())
+        # What the last check found -- this one, when live, otherwise the watcher's, which is at most ten minutes
+        # old (a minute while a login is out). Before any check it is only what is configured.
         out: dict[str, Any] = {
-            "tools": await tools_status(h.registry, h.audit),
-            "model": {"provider": h.config.provider, "model": h.config.resolved_model,
-                      "profile": h.config.profile, "region": h.config.region},
+            "tools": await tools_status(h.registry, h.audit, h.logins.tools),
+            "model": h.logins.model or {"provider": h.config.provider, "model": h.config.resolved_model,
+                                        "profile": h.config.profile, "region": h.config.region},
             "mail_compose": h.registry.find("mail_ai__send_draft") is not None,
         }
         if live:
-            network, model = await asyncio.gather(
-                asyncio.to_thread(network_status), asyncio.to_thread(model_status, h.config))
-            out["network"], out["model"] = network, model
+            out["network"] = network
         return out
 
     # -----------------------------------------------------------------------
     # Uploads. The body is the file itself, streamed to disk -- a four-hour recording is
-    # never held in memory. Each ends in a path, which is all any tool needs.
+    # never held in memory. Each goes into the file store under its own name and ends in a
+    # path, which is all any tool needs.
     # -----------------------------------------------------------------------
 
     def refuse(error: up.UploadError) -> JSONResponse:
@@ -590,61 +640,131 @@ def create_app(
 
     @app.get("/api/uploads")
     async def list_uploads() -> dict[str, Any]:
-        return up.listing(uploads_root)
+        return await up.listing(file_index, files_root, texts_root)
+
+    async def take(request: Request, name: str, kind: str, target_for: Callable[[Path, str], tuple[str, Path]],
+                   limit: int) -> tuple[files.StoredFile, Path]:
+        """One file into a new slot of its own, recorded once whole. A refused or broken-off upload leaves
+        no slot behind."""
+        file_id, target = target_for(files_root, name)
+        try:
+            size, sha256 = await up.receive(target, request.stream(), limit)
+        except BaseException:
+            files.discard_slot(files_root, file_id)
+            raise
+        return await up.keep(file_index, file_id, kind, target, size, sha256), target
 
     @app.put("/api/uploads/audio")
     async def upload_audio(request: Request, name: str):
         h = hub()
         try:
-            target = up.audio_target(uploads_root, name)
-            size = await up.receive(target, request.stream(), up.MAX_AUDIO_BYTES)
+            record, target = await take(request, name, "audio", up.audio_target, up.MAX_AUDIO_BYTES)
         except up.UploadError as error:
             return refuse(error)
-        h.note_text(f"The user uploaded audio {target.name} ({size} bytes), saved at {target}.")
-        await h.emit({"type": "upload", "kind": "audio", "name": target.name, "path": str(target)})
-        return {"name": target.name, "path": str(target), "bytes": size}
+        h.note_text(f"The user uploaded audio {target.name} ({record.bytes} bytes), saved at {target}.")
+        await h.emit({"type": "upload", "kind": "audio", "id": record.id, "name": target.name, "path": str(target)})
+        return {"id": record.id, "name": target.name, "path": str(target), "bytes": record.bytes}
 
     @app.put("/api/uploads/book")
     async def upload_book(request: Request, name: str):
         h = hub()
         try:
-            target = up.book_target(uploads_root, name)
-            size = await up.receive(target, request.stream(), up.MAX_BOOK_BYTES)
+            record, target = await take(request, name, "book", up.book_target, up.MAX_BOOK_BYTES)
         except up.UploadError as error:
             return refuse(error)
-        h.note_text(f"The user uploaded a book (PDF) {target.name} ({size} bytes), saved at {target}.")
-        await h.emit({"type": "upload", "kind": "book", "name": target.name, "path": str(target)})
-        return {"name": target.name, "path": str(target), "bytes": size}
+        h.note_text(f"The user uploaded a book (PDF) {target.name} ({record.bytes} bytes), saved at {target}.")
+        await h.emit({"type": "upload", "kind": "book", "id": record.id, "name": target.name, "path": str(target)})
+        return {"id": record.id, "name": target.name, "path": str(target), "bytes": record.bytes}
 
     @app.put("/api/uploads/voice")
     async def upload_voice(request: Request, name: str):
         h = hub()
         try:
-            target = up.voice_target(uploads_root, name)
-            size = await up.receive(target, request.stream(), up.MAX_VOICE_BYTES)
+            record, target = await take(request, name, "voice", up.voice_target, up.MAX_VOICE_BYTES)
         except up.UploadError as error:
             return refuse(error)
         h.note_text(f"The user uploaded a recording {target.name} to clone a voice from "
-                    f"({size} bytes), saved at {target}.")
-        await h.emit({"type": "upload", "kind": "voice", "name": target.name, "path": str(target)})
-        return {"name": target.name, "path": str(target), "bytes": size}
+                    f"({record.bytes} bytes), saved at {target}.")
+        await h.emit({"type": "upload", "kind": "voice", "id": record.id, "name": target.name, "path": str(target)})
+        return {"id": record.id, "name": target.name, "path": str(target), "bytes": record.bytes}
 
     @app.post("/api/uploads/delete")
     async def delete_upload(body: UploadDeletion):
-        """Delete one upload by kind and name, as the listing gave them. Only buttons reach this: no tool
-        offers it, so a model cannot delete a person's files. Every delete is audited and noted."""
+        """Delete one upload by the id the listing gave it. Only buttons reach this: no tool offers it, so
+        a model cannot delete a person's files. Every delete is audited and noted."""
         h = hub()
         try:
-            gone = up.delete_upload(uploads_root, body.kind, body.name)
+            gone = await up.delete_upload(file_index, files_root, body.id)
         except up.UploadError as error:
             return refuse(error)
         except OSError as error:
             return refuse(up.UploadError(f"could not delete it: {error.strerror or error}"))
         h.note_text(f"The user deleted the {gone['kind']} upload {gone['name']}; it no longer exists.")
-        await h.emit({"type": "upload_deleted", "kind": gone["kind"], "name": gone["name"]})
-        await audit.record(tool="assistant__delete_upload", arguments={"kind": body.kind, "name": body.name},
+        await h.emit({"type": "upload_deleted", "kind": gone["kind"], "id": gone["id"], "name": gone["name"]})
+        await audit.record(tool="assistant__delete_upload",
+                           arguments={"id": gone["id"], "kind": gone["kind"], "name": gone["name"]},
                            outcome="ok", result=f"{gone['files']} file(s), {gone['bytes']} bytes", origin="button")
         return gone
+
+    @app.get("/api/files/{file_id}")
+    async def stored_file(file_id: str):
+        """An upload, by the id the listing gave it, for the web app to play or download. A folder of
+        markdown is not a file to send. Every refusal is the same plain 404, as for /api/files."""
+        record = await file_index.get(file_id) if files.is_id(file_id) else None
+        if record is None or record.kind == "docs":
+            raise HTTPException(404, "no such file")
+        candidate = files.path_of(files_root, record)
+        try:
+            resolved = candidate.resolve()
+        except (ValueError, OSError):
+            raise HTTPException(404, "no such file") from None
+        if candidate.is_symlink() or not resolved.is_file() or resolved.parent != (files_root / record.id).resolve():
+            raise HTTPException(404, "no such file")
+        return FileResponse(resolved, media_type=STORED_TYPES.get(resolved.suffix.lower(), "application/octet-stream"),
+                            filename=record.name)
+
+    # -----------------------------------------------------------------------
+    # What tools made that the suite keeps (records.py): listed under the tool's own labels, its text read one at
+    # a time, deleted only by a button. The page knows what they are; this server does not.
+    # -----------------------------------------------------------------------
+
+    @app.get("/api/records")
+    async def list_records(tool: str, kind: str | None = None) -> dict[str, Any]:
+        return {"records": [await shown(r, file_index) for r in await records.find(tool, kind)]}
+
+    @app.get("/api/records/{record_id}")
+    async def one_record(record_id: str) -> dict[str, Any]:
+        record = await records.by_id(record_id) if files.is_id(record_id) else None
+        if record is None:
+            raise HTTPException(404, "no such record")
+        return {**await shown(record, file_index), "text": record.text}
+
+    @app.post("/api/records/delete")
+    async def delete_records(body: RecordDeletion):
+        """Delete records and their files, by the ids the listing gave. Only buttons reach this: no tool offers
+        it, so a model cannot delete what a person kept. Audited and noted, as deleting an upload is."""
+        h = hub()
+        gone: list[Any] = []
+        for record_id in dict.fromkeys(body.ids):
+            record = await records.by_id(record_id) if files.is_id(record_id) else None
+            if record is None:
+                return refuse(up.UploadError(f"no such record: {record_id}"))
+            gone.append(record)
+        size = 0
+        for record in gone:
+            await records.remove(record.id)
+            for file_id in record.files.values():
+                size += await files.drop_made(file_index, files_root, file_id)
+        if gone:
+            names = sorted({str(r.labels.get("title") or r.key) for r in gone})
+            h.note_text(f"The user deleted {len(gone)} kept item(s) of {gone[0].tool}: {', '.join(names[:10])}; "
+                        f"they no longer exist.")
+            await h.emit({"type": "records_changed", "tool": gone[0].tool})
+            await audit.record(tool="assistant__delete_records",
+                               arguments={"tool": gone[0].tool, "kinds": sorted({r.kind for r in gone}),
+                                          "keys": [r.key for r in gone][:50]},
+                               outcome="ok", result=f"{len(gone)} record(s), {size} bytes", origin="button")
+        return {"deleted": len(gone), "bytes": size}
 
     @app.get("/api/files")
     async def media(path: str):
@@ -663,37 +783,34 @@ def create_app(
             raise HTTPException(404, "no such file")
         return FileResponse(resolved, media_type=kind, filename=resolved.name)
 
+    # Markdown goes into the database, not the file store: held until the batch is done, then stored whole.
     @app.post("/api/uploads/docs")
     async def start_docs(body: dict[str, Any]):
         try:
-            return {"batch": up.new_batch(uploads_root, str(body.get("name", "")))}
+            return {"batch": doc_batches.start(str(body.get("name", "")))}
         except up.UploadError as error:
             return refuse(error)
 
     @app.put("/api/uploads/docs/{batch}")
     async def upload_doc(batch: str, request: Request, name: str):
         try:
-            target = up.doc_target(uploads_root, batch, name)
-            size = await up.receive(target, request.stream(), up.MAX_DOC_BYTES)
+            kept, size = await doc_batches.receive(batch, name, request.stream())
         except up.UploadError as error:
             return refuse(error)
-        return {"name": target.name, "bytes": size}
+        return {"name": kept, "bytes": size}
 
     @app.post("/api/uploads/docs/{batch}/done")
     async def finish_docs(batch: str):
         h = hub()
-        batch_dir = (uploads_root / "docs" / batch).resolve()
-        if not batch_dir.is_relative_to(uploads_root.resolve()) or not batch_dir.is_dir():
-            return refuse(up.UploadError(f"no upload batch {batch!r}"))
-        files = sorted(p.name for p in batch_dir.glob("*.md"))
-        if not files:
-            batch_dir.rmdir()
-            return refuse(up.UploadError("none of those files were markdown (.md)"))
-        path = up.doc_path(batch_dir)
-        h.note_text(f"The user uploaded markdown for a document: {', '.join(files)}, "
+        try:
+            record, names = await doc_batches.finish(file_index, batch)
+        except up.UploadError as error:
+            return refuse(error)
+        path = texts.path_for(texts_root, record, names)
+        h.note_text(f"The user uploaded markdown for a document: {', '.join(names)}, "
                     f"ready to build from {path}.")
-        await h.emit({"type": "upload", "kind": "docs", "name": batch_dir.name, "path": str(path)})
-        return {"name": batch_dir.name, "path": str(path), "files": files}
+        await h.emit({"type": "upload", "kind": "docs", "id": record.id, "name": record.name, "path": str(path)})
+        return {"id": record.id, "name": record.name, "path": str(path), "files": names}
 
     @app.get("/api/history")
     async def audit_history(limit: int = 200) -> list[dict[str, Any]]:
@@ -728,7 +845,10 @@ def main() -> None:
 
     quieten_libraries()
     # The token is random per launch unless ASSISTANT_TOKEN fixes it.
-    uploads = Path(os.environ["ASSISTANT_UPLOADS"]) if os.environ.get("ASSISTANT_UPLOADS") else None
+    stored = Path(os.environ["ASSISTANT_FILES"]) if os.environ.get("ASSISTANT_FILES") else None
+    lent = Path(os.environ["ASSISTANT_TEXTS"]) if os.environ.get("ASSISTANT_TEXTS") else None
+    # The old uploads folder: what is still in it is copied into the file store on start, once.
+    uploads = Path(os.environ.get("ASSISTANT_UPLOADS") or ROOT / "uploads")
     origins = tuple(o.strip() for o in os.environ.get("ASSISTANT_ORIGINS", "").split(",") if o.strip())
     hosts = parse_hosts(os.environ.get("ASSISTANT_HOSTS"))
     fixed = bool(os.environ.get("ASSISTANT_TOKEN"))
@@ -756,12 +876,24 @@ def main() -> None:
             moved = ", ".join(f"{n} {labels[name]}" for name, n in database.imported.items() if n)
             if moved:
                 print(f"  imported from the old files, which are now renamed .imported: {moved}", flush=True)
+        print(f"files: {holder['app'].state.files_root}; markdown in the database, lent to tools in "
+              f"{holder['app'].state.texts_root}", flush=True)
+        imported = dict(holder["app"].state.files_imported)
+        unreadable = imported.pop("docs_unreadable", 0)
+        copied = ", ".join(f"{n} from {folder}" for folder, n in imported.items() if n)
+        if copied:
+            print(f"  copied in from the old uploads folder, whose folders are now renamed .imported: {copied}",
+                  flush=True)
+        if unreadable:
+            print(f"  NOT copied in: {unreadable} markdown folder(s) that are not UTF-8 text; they are in "
+                  f"docs.imported", flush=True)
         print(f"access token: {holder['app'].state.token}", flush=True)
         if not fixed:
             print("  (new on every launch; set ASSISTANT_TOKEN in .env to keep one across restarts)",
                   flush=True)
 
-    app = create_app(Path(args.tools), Path(args.memory), Path(args.audit), uploads_path=uploads,
+    app = create_app(Path(args.tools), Path(args.memory), Path(args.audit), files_path=stored,
+                     texts_path=lent, legacy_uploads=uploads,
                      provider=args.provider, model=args.model,
                      token=os.environ.get("ASSISTANT_TOKEN") or None,
                      origins=origins or DEFAULT_ORIGINS, hosts=hosts, on_ready=announce,

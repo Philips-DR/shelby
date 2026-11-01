@@ -21,6 +21,8 @@ AUTH = {"x-assistant-token": TOKEN}
 
 
 def app_for(tmp_path, **kwargs):
+    kwargs.setdefault("files_path", tmp_path / "files")  # never the real store beside the code
+    kwargs.setdefault("texts_path", tmp_path / "texts")
     return create_app(
         tmp_path / "tools.yaml", tmp_path / "memory.json", tmp_path / "audit.jsonl",
         token=TOKEN,

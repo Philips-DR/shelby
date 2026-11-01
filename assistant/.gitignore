@@ -8,6 +8,10 @@ memory.json
 lexicon.json
 audit.jsonl
 
-# What people upload: audio to transcribe, markdown to turn into Docs.
+# What people upload: audio to transcribe, markdown to turn into Docs. files/ is the store they now go to
+# (files.py); uploads/ is the old folder, copied into it once. texts/ holds a document lent to a tool, for
+# the length of one call (texts.py).
+files/
+texts/
 uploads/
 

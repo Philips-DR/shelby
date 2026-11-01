@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from contextlib import AsyncExitStack
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -28,7 +28,9 @@ QUALIFIER = "__"
 # What the backend knows that a tool must not. A tool inherits the backend's environment (that is how
 # credentials and paths reach it), so anything the backend alone may use has to be taken out of it:
 # a tool holding the database address could read memory, which no tool may.
-WITHHELD_FROM_TOOLS = ("DATABASE_URL",)
+# The model's key is the backend's too, and goes by name to the one tool that calls a model (meet-ai, in tools.yaml):
+# inherited by all, it would sit in the environment of web-ai, which reads arbitrary web pages.
+WITHHELD_FROM_TOOLS = ("DATABASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 
 def tool_environment(extra: dict[str, str]) -> dict[str, str]:
@@ -93,7 +95,7 @@ class LocalTool:
     # What the approval gate shows instead of raw arguments -- a whole document as a JSON
     # string cannot be reviewed. A remote tool declares its preview in _meta; a local one
     # simply renders it.
-    render: Callable[[dict[str, Any]], str] | None = None
+    render: Callable[[dict[str, Any]], Awaitable[str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,16 @@ class ToolRegistry:
         self._sessions: dict[str, ClientSession] = {}
         self._stack = AsyncExitStack()
         self.tools: list[RemoteTool] = []
+        # Held around every call to a tool: what its arguments name that must be on disk for it, there for the
+        # length of the call. Stored markdown is lent this way (texts.py); nothing, until the server sets it.
+        self.lend: Callable[[dict[str, Any]], AbstractAsyncContextManager[Any]] = lambda _arguments: nullcontext()
+        # Told of every call to a tool that may have changed something (not read-only, and not reported as failed),
+        # once it has returned: what it made may now be worth keeping (collect.py). Nothing, until the server sets it.
+        self.changed: Callable[[RemoteTool], None] = lambda _tool: None
+
+    def folders_of(self, server: str) -> list[Path]:
+        """The folders one tool declared in tools.yaml (`files:`): what it makes, which may be served and kept."""
+        return [Path(f) for s in self._servers if s.safe_name == server for f in s.files]
 
     @property
     def media_roots(self) -> list[Path]:
@@ -232,7 +244,7 @@ class ToolRegistry:
             if local is None or local.render is None:
                 return None
             try:
-                return local.render(arguments)
+                return await local.render(arguments)
             except Exception:
                 return None  # declared and not produced: the gate says so
 
@@ -277,11 +289,15 @@ class ToolRegistry:
             except Exception as exc:
                 return ToolOutcome(text=str(exc), is_error=True)
 
-        result = await self._sessions[tool.server].call_tool(tool.name, arguments)
+        async with self.lend(arguments):
+            result = await self._sessions[tool.server].call_tool(tool.name, arguments)
         blocks = getattr(result, "content", []) or []
         text = "\n".join(b.text for b in blocks if getattr(b, "type", None) == "text")
         # `is_error`, not `isError`: mcp 2.x exposes snake_case attributes and keeps the
         # camelCase spelling only as a wire alias. Reading the alias off the object returns
         # nothing and silently reports every failure as a success -- the same rename that
         # turned inputSchema into input_schema, and worth checking rather than recalling.
-        return ToolOutcome(text=text, is_error=bool(getattr(result, "is_error", False)))
+        outcome = ToolOutcome(text=text, is_error=bool(getattr(result, "is_error", False)))
+        if not tool.read_only and not outcome.is_error:
+            self.changed(tool)
+        return outcome

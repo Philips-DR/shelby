@@ -21,10 +21,13 @@ ANTHROPIC = "anthropic"
 PROVIDERS = (BEDROCK, ANTHROPIC)
 BEDROCK_PREFIX = "anthropic."
 
-# Opus 5 where it is available. On this Bedrock account it is not granted -- see meet-ai's
-# client.py for the probe -- so Bedrock defaults to the most capable id that answers.
+# The first-party API's most capable model (Opus 5.5). **Not run against the API**: there was never a key here, so the
+# id is as the model list documents it, and Settings asks the API whether this key can use it (`status.model_status`)
+# and says so plainly if not. Name another one with SUITE_MODEL in `.env`, without touching the code.
+# On the Bedrock account Opus 5 is not granted -- see meet-ai's client.py for the probe -- so Bedrock defaults to the
+# most capable id that answers.
 DEFAULT_MODELS = {
-    ANTHROPIC: "claude-opus-5",
+    ANTHROPIC: "claude-opus-5-5",
     BEDROCK: "us.anthropic.claude-opus-4-6-v1",
 }
 
@@ -62,7 +65,8 @@ def model_config_from_environment(provider: str | None = None, model: str | None
     """The one place the environment is read for credentials. Front doors only."""
     return ModelConfig(
         provider=resolve_provider(provider),
-        model=model,
+        # The id from `--model`, else ASSISTANT_MODEL, else SUITE_MODEL (the one `.env` line both this and meet-ai read).
+        model=model or os.environ.get("ASSISTANT_MODEL") or os.environ.get("SUITE_MODEL") or None,
         region=os.environ.get("AWS_REGION"),
         profile=os.environ.get("AWS_PROFILE"),
         api_key=os.environ.get("ANTHROPIC_API_KEY"),

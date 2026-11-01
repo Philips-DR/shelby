@@ -15,6 +15,11 @@ servers:
   - name: meet-ai
     command: ${MEET_AI_HOME:-../meet-ai}/mcp
     cwd: ${MEET_AI_HOME:-../meet-ai}
+    env:
+      # The model's key, given by name to the one tool that calls a model (notes and minutes). The backend withholds it from
+      # every other tool (tools.py), so a key in .env never reaches web-ai, which reads arbitrary web pages. Empty when unset.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
 
   - name: docu-ai
     command: npm
@@ -27,12 +32,13 @@ servers:
 
   # Checks between a job posting, the user's own material and a draft: every requirement set against what
   # the material shows, and every figure and overstating word in a draft traced to a line. Reads only. The
-  # uploads folder is the one place it may read from, injected here like every other path.
+  # one place it may read from is where the assistant lends a stored document for a call (the text itself is
+  # in the database, which no tool reaches), injected here like every other path.
   - name: apply-ai
     command: ${APPLY_AI_HOME:-../apply-ai}/mcp
     cwd: ${APPLY_AI_HOME:-../apply-ai}
     env:
-      APPLY_AI_ROOTS: ${ASSISTANT_UPLOADS:-../assistant/uploads}
+      APPLY_AI_ROOTS: ${ASSISTANT_TEXTS:-../assistant/texts}
 
   # Reads web pages, checks that a link answers, and asks GitHub what a stranger sees. Reads only, but it
   # reaches the internet, so it refuses every address that is not a public one: it cannot be pointed at this
@@ -61,6 +67,6 @@ servers:
   - name: audiobook
     command: ${AUDIOBOOK_HOME:-../audiobook}/mcp
     cwd: ${AUDIOBOOK_HOME:-../audiobook}
-    # The audio it makes, which the web app may play and download. Relative to its own folder;
-    # nothing outside the folders named here is ever served.
-    files: [output]
+    # What it makes: the audio, its voices and the recordings they were cloned from. Relative to its own folder.
+    # Nothing outside the folders named here is ever served, or taken into the suite's keeping (collect.py).
+    files: [output, voices, voice]

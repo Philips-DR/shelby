@@ -210,7 +210,8 @@ def test_migrations_apply_once_in_order_and_a_failing_one_leaves_nothing_behind(
     first, again, c_exists, recorded = run(scenario())
     assert first == ["001_a.sql", "002_b.sql"] and again == []
     assert c_exists is False  # the failed file was rolled back whole
-    assert recorded == ["001_a.sql", "001_initial.sql", "002_b.sql"]
+    assert recorded == ["001_a.sql", "001_initial.sql", "002_b.sql", "002_files.sql", "003_file_texts.sql",
+                        "004_records.sql"]
 
 
 @needs_postgres

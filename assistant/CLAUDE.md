@@ -185,19 +185,64 @@ Four things that only showed up by running it:
   "reconnecting" — corrupting exactly what it is measuring. Drive a real browser session
   (Puppeteer against the installed Chrome) instead.
 
-## Uploads
+## Uploads, and the file store (`uploads.py`, `files.py`, `texts.py`, 2026-10-31)
 
-Audio to transcribe and markdown to build into a Doc arrive at `/api/uploads/*` and land in
-`uploads/` (never committed; `ASSISTANT_UPLOADS` moves it). **An upload ends in a path, and a
-path is all any tool takes** — so meet-ai and docu-ai did not change and do not know uploads
-exist. The same file works from a button or from chat.
+Audio to transcribe, a book (PDF) and a voice sample arrive at `/api/uploads/*` and land in the
+**file store**: `<ASSISTANT_FILES>/<id>/<name>` (`/data/files` in the containers, `files/` in a bare
+checkout, never committed), each recorded in the `files` table (`migrations/002_files.sql`), or in
+`index.json` at the store's root with no database. **Markdown goes into the database itself**, see below.
+**An upload ends in a path, and a path is all any tool takes** — so meet-ai, docu-ai, audiobook and
+apply-ai did not change and do not know the store or the database exists. The same file works from a
+button or from chat. Layer 1b of `../plan.md`; this is its phase A.
+
+**Markdown: the text is in the database, and a tool is lent a copy for one call (the user's call,
+2026-10-31).** An uploaded or drafted document is a `docs` row in `files` plus one `file_texts` row per file
+(`migrations/003_file_texts.sql`), written in one transaction; the database holds its only lasting copy, and
+nothing of it is on disk between calls. Its path is `<ASSISTANT_TEXTS>/<id>/<name>/` (or that folder's one
+file), which the listing, the model and the audit log see. **Every call to a tool runs inside
+`registry.lend(arguments)`** (`ToolRegistry.call`, so chat, buttons, previews and schedules alike): any string
+in the arguments, at any depth, that names a stored document gets a read-only copy written there just before
+the call (whole, renamed into place) and removed when it ends, with a `.draft` marker in an assistant's draft.
+Two calls naming one document share one copy. Nothing else is touched: a path naming no stored document reaches
+the tool unchanged. Leftovers from a crash are cleared on start, and only names a lend makes (`texts.clear`).
+The texts folder must not be, or hold, the file store (`create_app` refuses). In the containers it is
+`/tmp/assistant-texts`, inside the container and deliberately not under `/data`. Why a lend and not a tool
+reading the database: no tool may get `DATABASE_URL` (the user chose this, 2026-10-31, once it was clear the
+backend needs no model to run). The assistant's own `read_document` and `write_draft` read and write the
+database directly.
+
+- **Uploading markdown**: a batch is held in memory (`DocBatches`) until `done`, then stored whole, so a broken-off
+  upload stores nothing. 20 MB for a whole batch, at most 5 open, an hour each. A file must be UTF-8 with no NUL
+  (PostgreSQL's text holds none); anything else is refused, never stored lossily. Run for real on a copy of the
+  real data: the 4 drafts went in byte for byte, docu-ai and apply-ai (real processes) read lent copies, apply-ai
+  refused a draft by its marker, neither tool process held `DATABASE_URL`, and nothing was left on disk.
+
+- **A folder per file, named by an id, holding the file under its own name.** Not a content hash and
+  not per-user folders: tools use the name (docu-ai titles a Doc after its folder or file, audiobook names a
+  book's audio after its PDF, meet-ai a transcript after its recording), so it is kept exactly, and an
+  upload of the same name again keeps it too, in a folder of its own (no more `name (2).ext`). The id says
+  nothing about whose a file is; that will be `user_id` on its row. The SHA-256 is recorded for checking.
+- **Deleting is by id** (`POST /api/uploads/delete {id}`), since two uploads may share a name, and a slot is
+  removed only once empty: audiobook writes a book's `.corrections.txt` beside its PDF, and that stays.
+- **`GET /api/files/{id}`** sends an upload (a PDF, a recording) for the app to play or download; the old
+  `GET /api/files?path=` still serves what a tool made, from its declared folders, until phase B moves that.
+- **The old `uploads/` folder is copied in once** (`import_old_uploads`, when `main()` passes it): each file
+  into a slot of its own, checked by hash, recorded with its modification time as when it was uploaded; each
+  markdown folder into the database, read back and checked by hash, a draft folder (`.draft`) as made by the
+  assistant; then each old folder is renamed `.imported`. A markdown folder that is not UTF-8 text is left in
+  `docs.imported` and said so at start. Safe to run again (same kind, name and hash is skipped).
+  `uploads/exports/` stays: docu-ai saves files there for mail-ai to attach. Tests never import: `create_app`
+  only does when given `legacy_uploads`, and `tests/test_server.app_for` always gives a temporary store.
+- **apply-ai reads only where documents are lent** (`APPLY_AI_ROOTS` is `ASSISTANT_TEXTS`), and still refuses
+  a folder holding `.draft`, which the lend writes into a draft's copy: the row says it too, but apply-ai reads
+  folders, not the database.
 
 - **The request body is the file**, streamed to disk; nothing is buffered whole, and no
   multipart parser is involved. The web app uses XMLHttpRequest, not fetch, for these: only it
-  reports upload progress.
+  reports upload progress. (Markdown is the exception: held in memory, under its batch's limit.)
 - **Every name is hostile.** Each path component is checked, the result must resolve inside
-  `uploads/`, a repeat name becomes `name (2).ext`, and a file is written to `.part` and renamed
-  only once complete — a half-received recording is never listed or transcribed. Tested.
+  the store, and a file is written to `.part` and renamed only once complete — a half-received
+  recording is never listed or transcribed. Tested.
 - **Markdown arrives as a batch** named for the uploaded folder (or file), because docu-ai uses
   the folder's name as the Doc's default title. One file builds as a file (one tab, no cover);
   several as a folder. docu-ai reads only a folder's top level, so the web app sends only
@@ -206,13 +251,45 @@ exist. The same file works from a button or from chat.
 - **Each upload is noted for the model** with the next message, like a button press — which is
   what makes "transcribe what I just uploaded" work, from either mode.
 
+## What tools made, kept (`records.py`, `collect.py`, 2026-11-01)
+
+Layer 1b, phase B of `../plan.md`, in the shape the user chose ("A", 2026-11-01): **a tool labels what it made; the
+assistant files it under those labels without knowing what it is; the page that knows (Audiobooks) reads it back.**
+The workshop and the warehouse: the tool keeps working at its own bench, alone or in the suite, and finished work is
+carried to the store and the database.
+
+- **Two agreed names, like `login_status`.** A tool that keeps things offers a read-only `inventory` (items: `kind`,
+  `key`, `labels`, `text`, `version`, `files: [{path, role}]`, `release`) and a `release` (delete these working
+  copies, each named by path and the SHA-256 of the copy filed; the tool checks the hash first). Only the names are
+  agreed. Only a read-only `inventory` is ever called. audiobook is the one tool that offers them (`keeping.py`).
+- **Collecting** (`Collector`): at start (the first time, that is the taking-in of what is already there), after any
+  call to the tool that may have changed something (`registry.changed`: not read-only, not failed; never the
+  collector's own `inventory` or `release`, or it would set itself off for ever, which a test pins), and when the
+  watcher sees one of its jobs finish a chapter or end (`watch(on_change=...)`). One at a time; asked again while one
+  runs, it runs once more after. An item whose version is filed already is skipped (a restart files nothing twice).
+- **Every file it takes is a plain file in a folder the tool declared** (`files:` in `tools.yaml`, now also the
+  collection boundary): not a link (even to the tool's own file), not a relative path, not `..`. Copied into a slot of
+  its own (`kind made`, `made_by tool`, never listed among uploads), checked by hash; a failed copy leaves nothing.
+  Filing the same key again replaces the record and drops its old files (`files.drop_made`, which never touches an
+  upload). Released only after filing, and only items the tool marked `release`.
+- **The database:** `records` (unique on tool, kind, key; labels JSONB; body; version) and `record_files` (role ->
+  file, `ON DELETE RESTRICT`, so a named file cannot be removed under its record), `migrations/004_records.sql`;
+  `records.json` with no database. `GET /api/records?tool=`, `GET /api/records/{id}` (with its text), `POST
+  /api/records/delete {ids}` (buttons only, audited as `assistant__delete_records`, noted); kept files play by id
+  (`/api/files/{id}`). `assistant__list_kept` lets the model see them, since the tool no longer lists audio it gave up.
+- **Run for real (2026-11-01)** in a container built from this code, on a copy of the real data and a throwaway
+  Postgres: 105 audio files filed with their originals' SHA-256 and released, 3 voices filed and left at the bench,
+  12 jobs filed with readable logs, nothing filed twice by a restart; the Audiobooks page showed what the live one
+  shows, book for book and chapter for chapter; a real render of a chapter was filed with its exact text, replaced
+  the old copy and left the bench. See `../plan.md` -> Built and verified.
+
 ## Drafting documents (`documents.py`)
 
 `list_uploads`, `read_document` and `write_draft` let the model change what a document *says* —
 tailor a CV, rewrite a report — which it could not do before: asked to "create a CV for an ML
 engineer role" it formatted the upload as it was and replied as though it had tailored it. Local
-tools, like memory, because the uploads folder is the assistant's own state. Four rules, each
-from something that went wrong live:
+tools, like memory, because stored documents are the assistant's own state (in the database, read and
+written there directly). Four rules, each from something that went wrong live:
 
 - **A draft is always a new file.** The original must survive to be compared against.
 - **The approval shows the draft rendered, whole.** A local tool can now `render` its own
@@ -226,8 +303,8 @@ from something that went wrong live:
 - **Say what was and was not done.** The system prompt now requires it, and forbids inventing
   experience, employers, dates, qualifications, figures or skills.
 
-- **A draft is marked as the assistant's own** (2026-10-15). `write_draft` drops a `.draft` file beside it and
-  `list_uploads` reports `draft: true`. A check that compares a new draft with "the user's own material"
+- **A draft is marked as the assistant's own** (2026-10-15). `write_draft` records it as made by the assistant,
+  a lent copy of it carries a `.draft` file beside it (`texts.py`), and `list_uploads` reports `draft: true`. A check that compares a new draft with "the user's own material"
   (apply-ai) refuses a marked folder: on a second application the model passed its own earlier cover letter
   as a source, and a claim it had made would have been supported by itself. A convention in a filename, not an
   import. Drafts written before the marker have none (add `.draft` by hand).
@@ -253,8 +330,9 @@ sample never shows up as something to transcribe. Same rules as every upload: ho
 
 ## Audio a tool made (`GET /api/files`)
 
-How the web app plays and downloads what a tool rendered, without the assistant learning where any
-tool keeps anything. Five rules, the first four tested in `tests/test_uploads.py`:
+How the web app plays and downloads what a tool rendered and has not yet handed over (since phase B, finished
+audio is kept in the store and played by id; this serves only what is still at the tool's bench), without the
+assistant learning where any tool keeps anything. Five rules, the first four tested in `tests/test_uploads.py`:
 
 - **A tool declares what may be served, in `tools.yaml`** (`files: [output]`, relative to the tool's
   own folder). The API serves only audio files inside a declared folder; the registry's
@@ -314,12 +392,13 @@ and asked about first (`web/src/ui/ConfirmDelete.tsx`). Run for real on throwawa
   here. Chat itself shows nothing from before the last `chat_cleared`: a "You pressed" chip outlived the
   first clear (found live). Refused while a turn runs or an approval waits -- the turn holds an index into
   `messages`. Memory and the audit log are untouched; it is audited as `assistant__clear_chat`.
-- **An upload** (`POST /api/uploads/delete`, `{kind, name}` as the listing gave them). No tool offers it,
-  so a model cannot delete a person's files. The name is hostile, like an upload's: one component, a
-  direct child of its kind's folder, only the extensions that kind is listed by (never a `.part`), and a
-  markdown batch only if it holds plain files. **A link is refused outright**: a link to a sibling in the
-  same folder resolves inside it, passes every location check, and the real file is what would go (a test
-  pins it; the first version's tests passed without that check). Audited as `assistant__delete_upload`,
+- **An upload** (`POST /api/uploads/delete`, `{id}` as the listing gave it). No tool offers it,
+  so a model cannot delete a person's files. The id is hostile, like an upload's name: it must be one the
+  store made and has a record for, the file must be directly in that record's folder under the recorded
+  name, of the extensions its kind is listed by. A markdown document is only rows, so deleting it removes its
+  record and texts and touches nothing on disk. **A link is refused outright**: a link to another upload resolves inside the store, passes every location
+  check, and the real file is what would go (a test pins it; the first version's tests passed without
+  that check). Audited as `assistant__delete_upload`,
   noted for the model, and announced as `upload_deleted`. The assistant cannot tell that a file is in use
   (a recording being transcribed); the Meetings page hides its upload chips while a transcription runs.
 - **A Google Doc or an audiobook** is the owning tool's: `docu_ai__trash` (to Drive's bin, its approval shows
@@ -347,6 +426,55 @@ so a stop never carries over) and answers no to any approval waiting. `run_turn`
 Tools now carry their `title` (MCP's, or their annotations'), passed to the interface in `/api/tools` and in an
 approval, so a person reads "Write a new draft" rather than "draft new". The model is still shown name and
 description only.
+
+## Every login at a glance (`logins.py`, 2026-10-31)
+
+Settings could only say a tool had "failed its last call", so a lapsed Google login read as "Check" with a raw error, and the
+sidebar showed a green dot beside a model that could not answer. `Logins` (`Hub.logins`) checks the model's login and each tool's
+together, remembers the last answer, and announces a change once; Settings, the sidebar and the watcher all read it.
+
+- **A tool says its own login state; the assistant never reads a token.** A tool that can offers a read-only `login_status`,
+  answering `{state, detail, service}` with `state` one of `ok`, `dead` (refused: sign in again), `missing` (never signed in) or
+  `unknown` (could not tell). mail-ai and docu-ai do; only the name is agreed, so a tool with no such door is simply not asked.
+- **Only a read-only tool is called for it** (`tool_logins`), as with an approval's preview: a tool that used the name for
+  something that changes things must not be run by a page looking at health. Tested.
+- **"Could not tell" is never "fine".** A tool that raises, answers late (`LOGIN_WAIT`, 25 s), fails, or says something unreadable
+  is `unknown`, which changes nothing about its row and is never announced. Only `dead` and `missing` make a row an error, and
+  they do whatever the last call did (before, a Google login that had lapsed was a "warning" with the raw error).
+- **One command.** The fix is `./auth` for every login, said once in the banner: `SIGN_IN_AGAIN`. `model_status` now says
+  `signed_out` (expired) apart from the model being out of reach for another reason (no network), and gives the hint only for the
+  first, because signing in again would not fix the second.
+- **The watcher checks every ten minutes, every minute while a login is out**, so the page notices within about two minutes of
+  `./auth` finishing. `GET /api/status` (instant) returns what the last check found, so a page does not flash "not checked";
+  `?live=true` checks now. A check is under a lock: the watcher and a page's Check now would each announce the same change.
+- **Announced once, through the notice stream** (`login_notice`, `tool_login_notice`): going bad, and coming back. No event type
+  of its own: the sidebar reads `/api/status` once a minute and when a notice arrives, and Activity never sees a "login" row.
+- **Not covered:** a tool busy in a long call may answer late and read `unknown` for that check; a login that Google still
+  accepts but whose scopes were narrowed would read `ok`.
+
+**The model through an Anthropic API key (2026-10-31; Bedrock ends at the end of November).** `ANTHROPIC_API_KEY` in `.env` wins over
+Bedrock, here and in meet-ai (`resolve_provider`), and reaches both because `.env` is the backend's `env_file` and tools inherit
+its environment. `model_status` on that route (`_key_status`) asks the API for the model by id (`models.retrieve`: one read, spends
+nothing) and tells three failures apart, because each is fixed differently: **`key_refused`** (401/403: replace the key, hint
+`KEY_HINT`), **`model_missing`** (404: name another with `SUITE_MODEL`, listing what the key can use, hint `MODEL_HINT`), and
+anything else (the network: no setting fixes it, no hint). **"Not set up" is not an alarm:** no key and no AWS login to try
+(`NoCredentialsError` and friends) is `configured: False`, level `warning`, and Settings leaves it out of the things that need
+attention, because Mail, Meetings, Documents and Audiobooks work with no model at all (checked, below). A chat turn that dies
+because of the model now says so in plain words with a link to Settings (`status.model_failure`; the raw error stays in the event as
+`detail`) rather than "Something went wrong: <botocore text>". `SUITE_MODEL` (or `ASSISTANT_MODEL`, which wins) names the model for
+chat, `MEET_AI_MODEL` or `SUITE_MODEL` for meet-ai. **The key goes to the one tool that uses it, and to no other (`tools.py`, `tools.yaml`).** Tools inherit the backend's environment, which
+would have put a key from `.env` into web-ai (it reads arbitrary web pages), docu-ai, mail-ai, apply-ai and audiobook. `ANTHROPIC_API_KEY`
+and `ANTHROPIC_AUTH_TOKEN` are now in `WITHHELD_FROM_TOOLS`, and meet-ai's entry in `tools.yaml` names them (`${ANTHROPIC_API_KEY:-}`: empty
+when unset, which is not a provider). Checked on a running copy by reading each process's own environment: the backend and meet-ai
+held the key, the other six tools did not. (The AWS variables are still inherited by every tool, as before.) **Not run with a real key** (there is none here): a key Anthropic never issued
+was refused by the real API (`./auth --check`: `anthropic dead`), which exercised the refusal path end to end; the accepted path, and
+whether `claude-opus-5-5` is a model a real key can use, are unproven until a key is in `.env`. The default id was moved from
+`claude-opus-5` to `claude-opus-5-5` (the first-party default in both seams) from the model list this was written against.
+
+Run for real against the real logins (2026-10-31): the model signed out (`signed_out: true`, the `./auth` hint), Gmail and
+Google Docs `ok`, with the service names the tools gave. Then a second copy with the Gmail token replaced by one Google never
+issued and the Docs token absent: Google's own `invalid_grant` came back as `dead` and the missing file as `missing`, and the page
+showed three things signed out with one `./auth`. The real tokens were never touched.
 
 ## On a timer (`schedule.py`, 2026-10-30)
 

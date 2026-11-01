@@ -46,10 +46,11 @@ def test_a_recording_stopped_normally_is_not_an_alarm():
 
 
 def test_a_failing_login_is_announced_once_with_the_fix():
-    status = {"level": "error", "hint": "Run `aws sso login --profile ayadata-bedrock` in a terminal."}
+    from assistant.status import SIGN_IN_AGAIN
+    status = {"level": "error", "hint": SIGN_IN_AGAIN}
     notice = login_notice("ok", status)
     assert notice["title"] == "AWS login needs renewing"
-    assert "aws sso login" in notice["body"]
+    assert "./auth" in notice["body"]  # the one command, whichever login it was
     assert login_notice("error", status) is None  # not again on every poll
 
 
