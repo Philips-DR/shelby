@@ -73,6 +73,10 @@ Settled; reopen only with new evidence, and say so here when one changes.
     `./start-docker up`. The host-only path (starting the backend and web app as bare processes) is
     dropped. Postgres, Redis and any future infrastructure live as Compose services; no dual code path.
     Tests still run outside the container (`./test`) against file-based stores, with no Postgres needed.
+11. **Records and text in the database, files in one central store, no per-user folders** (2026-10-31, the user's
+    call). Every record and all text go in PostgreSQL; audio and other files stay files, but in one file store for
+    the whole suite, not in each tool's folder; a file on the user's Google Drive is their own folder and stays
+    there; everything else kept for a user is a row with a `user_id`. See "Layer 1b" below.
 
 ## Built and verified
 
@@ -122,7 +126,17 @@ Each was tested (`./test`) and run for real; the real runs found most of the bug
 
 | 10-31 | **Chat made better (the user's request; all five changes they chose).** **Found:** an email waiting for approval was shown as one line of JSON that ran off a phone's screen, so it could be approved half read. Now an approval is titled as the tool calls itself ("Write a new draft", from MCP's tool titles, which the assistant now passes on), says which tool family, and shows what it was asked as labelled fields, each value whole and wrapped (To, Subject, the body). A reply's tool calls fold into one line ("3 steps", with their tools' icons) that opens to each step by its own title, what it was asked and what came back (the events already carried both). A **Stop** button replaces Send while a reply runs (`POST /api/chat/stop`; see `assistant/CLAUDE.md` → Stopping a reply). Changes made with buttons on other pages fold into one line ("You did this on another page"), and the suggestions show whenever there is no conversation (four such chips had hidden them). "Jump to latest" moved to the right, a round arrow on a phone: centred, it covered an approval's Decline. **Run:** assistant 217 tests (8 new, with a fake model), web 77 (9 new), fourteen deliberate breaks: thirteen caught, one an extra guard no test can tell apart (kept, and said so); in Chrome at 11 widths, light and dark, with a real conversation and a real draft's approval waiting (to the user's own address, declined after): nothing wider than the window, no field cut off sideways, no wrapped label, Stop offered, axe clean (it found the scrolling result boxes unreachable by keyboard: fixed); a real reply stopped while the model thought, then a new question answered; the approval's title found missing when it arrived live (the page dropped the field) and fixed. Nothing was sent or saved to Gmail: every draft was declined. | `assistant/CLAUDE.md` → Stopping a reply |
 
-Test counts on 2026-10-31 (one `./test` run, all passed): assistant 217 + 8 Postgres tests that skip without `TEST_DATABASE_URL`, meet-ai 121, mail-ai 153, apply-ai 111, web-ai 149, audiobook 131, docu-ai 395 (+1 skipped, the live test), web 77 (+ typecheck), publish 15.
+| 10-31 | **Speech models on an NVIDIA card, the player going on by itself, and the Render button (the user's requests).** **NVIDIA:** Pocket TTS (audiobook) and Whisper (meet-ai) use an NVIDIA card when there is one and the CPU when there is not, found by the code at run time (`tts.place`; `transcribe.load_whisper`/`choose_device`, which loads cuBLAS 12 first, the one library CTranslate2 4.8 needs on a card, read from the library itself). A card that refuses the model falls back to the CPU and says why; the chunk cache's key is unchanged on the CPU. The install decides what a machine gets: `./setup` and `./start-docker` find a card by its driver and install NVIDIA's builds (`audiobook/requirements-nvidia.txt`, `meet-ai/requirements-nvidia.txt`; `compose.nvidia.yaml`; `SUITE_GPU=cpu` in `.env` keeps the CPU), 3.65 GB + 0.6 GB more than the CPU builds. Speaker labelling (sherpa-onnx) stays on the CPU. **This laptop has no GPU PyTorch can use** (Intel UHD 620, and an AMD Polaris card the driver does not list for compute), so it is unchanged. **Not run on a GPU:** the NVIDIA package sets were resolved (`pip install --dry-run`, 141 packages, `pip check` clean), detection was run against stand-ins in five situations, and the CPU path was run for real after the change (a sentence in `abigail`, 1.09x real time, Whisper read it back word for word). **Player:** a chapter plays on to the next that has audio when it ends (a switch, remembered in this browser, on by default; the next is fetched 90 s ahead; headphone next and previous buttons; "Up next" under the player); played to its end in Chrome on the real book, the switch turned off, and the last chapter, which stops. **Found and fixed:** Render offered "all chapters" for a book whose chapters were nearly all rendered, because every chapter started ticked: now only those with no audio are, and a finished book says so. The player's controls overlapped in a narrow column of a wide window (beside the Render card, in the side column at 1024 and 1066) and a file there pushed the page wider than the window; both now follow their own width. **Run:** meet-ai 131 tests (10 new), audiobook 137 (6 new), web 84 (7 new), seventeen deliberate breaks each caught (one was not, from a test whose list order happened to hide it: fixed); in Chrome at 11 widths, light and dark, in two player positions: nothing wider than the window, no overlapping control, no wrapped label, axe clean. | `audiobook/CLAUDE.md` -> Target hardware, `meet-ai/CLAUDE.md` -> Measured facts |
+
+| 10-31 | **Settings that say what is wrong, the Audiobooks cards, the docked player, and chapter openings (the user's requests).** **Settings (all five changes they chose):** (1) a login that is out is one fix in the banner, in plain words: "Signed out of the model, Google Docs and Gmail", the one command `./auth` with Copy, the raw error folded under "Technical detail" (the bottom callout shows only when nothing is out). (2) The Google logins are checked, not guessed: mail-ai and docu-ai each offer a read-only `login_status` that asks Google whether their own token still works (only `invalid_grant` is dead; no network is "could not tell", never "fine"; nothing is written), and `Logins` in the assistant remembers the answers, announces a change once, and checks every ten minutes, every minute while one is out. (3) apply-ai and web-ai are Applications and Web, with icons (briefcase, globe) and colours (slots 6 and 7); last actions are in the tool's own title ("Bring the local mailbox level with Gmail"), not `mail-ai · sync`. (4) The sidebar's model dot turns red and says "Signed out" (in the top bar on a phone too), and links to Settings. (5) Network: "No IPv6 on this connection" once, and no IPv6 column or line per service when none answered; the table view is a focusable scroll region (axe `scrollable-region-focusable`). **Audiobooks:** the Render card sits under Chapters, folded to one line ("Render 2 chapters · abigail, speed 0.95") and folding itself again once a render is started; the Listen card sits under it too, so Chapters, Render, Listen and Voices are one column. Tapping the docked player opens the book it is playing with that chapter in view and its player on screen (from another page or from the library), and follows an auto-advance. **Chapter openings:** "Chapter 6 Knowing the Source of Your Dreams" was said as one phrase with no breath between the label and the title; now the label is a sentence of its own, 0.7 s of silence, then the title (`render.announcement`). Checked with the real abigail voice and silence detection (before: no silence between them; after: about one second); **not listened to by ear**, and the user's finished chapters keep the old openings until they are rendered again (the body is cached, so a re-render is only the new title chunks). **Run:** assistant 248 tests (31 for logins), mail-ai 177 (24 new), docu-ai 20 new, audiobook 154 (17 new), web 106 (22 new); twenty-five deliberate breaks each caught (two first missed: a break whose test file was not in the run, and a pattern that did not match; both fixed); on a second copy of the stack on other ports, with the real logins, in Chrome at 11 widths from 360 to 1920 in both themes: Settings (chart and table view, the words, the fix, IPv6 once, the pill) all pass, nothing wider than the window, no wrapped button, axe clean; then with Gmail's token swapped for one Google never issued and Docs' removed, Google's real `invalid_grant` showed as three things signed out and one `./auth`; Render and Listen cards at 11 widths in both themes; the docked player against the real Dreams and Visions at 390, 1066 and 1440 (from Overview, from the library, and after the next chapter took over). The real tokens were never touched and nothing was rendered. **Not deployed:** a 4.5-hour render of another book was running (started by the user at 11:48), and a container restart interrupts it, so the backend and the new web build were not redeployed; the Render and Listen layout is live (deployed before it started), the rest waits. | `assistant/CLAUDE.md` -> Every login at a glance, `audiobook/CLAUDE.md` -> How a chapter opens |
+
+| 10-31 | **The model through an Anthropic API key, and every page working with no model (the user's requests: an Anthropic key is enough for now, Bedrock ends at the end of November, and Mail, Meetings, Documents and Audiobooks must work fully without the assistant).** An `ANTHROPIC_API_KEY` in `.env` already won over Bedrock in the code; what was missing is now built. **Settings and the sidebar** tell a key's failures apart, each fixed differently: *key refused* (Anthropic's real 401; replace it in `.env`, then `./start-docker up`), *model not available to this key* (names what the key can use; `SUITE_MODEL` in `.env`), *not reachable*; and a model that is simply **not set up** is information, not a fault ("Everything is working. No model is set up, so Chat and meeting notes are off"; the pill says "No model"). `model_status` asks the API for the model by id (one read, nothing spent). `./auth` checks the key instead of AWS when one is set (`anthropic dead: the API key was refused`, run against the real API with a key it never issued). `SUITE_MODEL` names the model for chat and for meeting notes; the first-party default moved to `claude-opus-5-5`. **Chat** says "The Anthropic API key was refused" / "No model is set up" / "The model's login has expired" with a link to Settings, not "Something went wrong: <botocore text>", and keeps the raw error beside it. **Meeting notes and minutes** with no model say "No model is set up, so notes cannot be written. ... Recording, transcribing and reading a meeting do not need a model" before anything else (the SDK's own words were "No AWS region was provided"). **Proved with no model at all** (no key, no AWS login, on the test copy): Mail (status, list, search), Audiobooks (voices, finished audio, job status), Meetings (recordings, a notes preview), Documents (a real Google Doc built from a throwaway upload and moved to the bin, Drive confirming it was in the Trash) and every tool's health all work; Chat and the notes say plainly why they cannot. **Not run:** a real key that Anthropic accepts (there is none here), so the accepted path, and whether `claude-opus-5-5` is a model a real key can use, are unproven until one is in `.env` (Settings will say so plainly if not); no other provider (an Anthropic key is enough for now: the two model calls use Anthropic's thinking, effort and JSON-schema features, and another vendor would need an adapter at each). **Run:** assistant 269 tests (52 for logins, the model and the key), meet-ai 146 (15 new), web 114; twenty-one deliberate breaks each caught (one first missed, from a test whose config already had no AWS settings: fixed); the key is withheld from every tool but meet-ai (checked on a running copy by reading each process's own environment: the backend and meet-ai held it, the other six tools did not); meeting notes with a refused key say so ("The Anthropic API key was refused, so notes cannot be written") instead of "Error executing tool generate_notes", against the real API; in Chrome at 390 and 1066, light and dark, in each model state (refused key, no model): nothing wider than the window, axe clean, the pill, banner, model card and Chat's error read. | `assistant/CLAUDE.md` -> Every login at a glance, `CLAUDE.md` -> The model is optional |
+| 10-31 | **Previous and next chapter buttons on the audio player, and Back that goes where you expect (the user's requests).** A chapter of a book now has previous and next buttons either side of back 15 / forward 30 (dimmed at the first and last chapter, named for the chapter they go to); the headphone buttons already did this. The five buttons make the middle 92 px wider, so the player's width steps for a chapter moved up by that much. **Found by reproducing it in Chrome as a phone:** Back skipped everything opened inside a page, because only the page is in the URL: from an open book it went to Chat, and the More sheet stayed open over the page it landed on. `useLayer` now records an open book, a Mail message or composer, a meeting (below 820 px; side by side the newest opens by itself, which would trap Back), and the More sheet and search box in the history entry, so Back closes it, the "All books" button leaves the same history, and coming back to a page finds the book open. **Run for real** on the real book through the dev server (the running app untouched): all 28 checks (18 presses of Back) on a phone and a 1066 px window landed where expected; the player at 14 widths from 280 to 1920 (light, and dark at five), none over the window or over another control, axe clean (one dark-mode sidebar flag at 1440 did not come back in two re-runs); Next and Previous clicked for real on Chapter 1 (to Chapter 2 and back), and the first and last chapters dimmed the right button. **Not done:** the docked player has no previous/next (no room on a phone); the delete confirmation and a chapter's text are not layers, so Back leaves the page from them; Previous always goes to the previous chapter (it does not restart this one first). | `web/DESIGN.md` -> Back, `web/src/ui/useLayer.ts` |
+| 10-31 | **Layer 1b, phase A: the central file store (the user's go-ahead: "lets start implementing it").** Every upload and every draft the assistant writes now goes to `data/files/<id>/<its own name>`, recorded in a new `files` table (`002_files.sql`; `index.json` with no database). Delete and serve by id (`/api/uploads/delete {id}`, `GET /api/files/{id}`); the same name uploaded twice keeps its name. The old `data/assistant/uploads` is copied in once on start (checked by hash, dated by modification time, drafts kept as the assistant's), then each folder renamed `.imported`; `exports/` stays. apply-ai reads from the store. The web app deletes by id. **Run for real** on a copy of the real uploads, with a second backend (port 8760, no tools) on a throwaway Postgres, the live containers untouched: it copied in 2 recordings, 4 books and 4 draft folders; the listing had the same names, sizes, upload times and draft marks as the live backend's; every stored file matched its original's SHA-256; the `files` table held 2 audio, 4 book and 4 docs rows; a throwaway PDF went in, came back by id as `application/pdf`, and was deleted by id. In the web app (dev server on that backend, Chrome as a phone): Documents and Meetings each deleted the one throwaway they showed and kept its namesake, and every real upload was still there afterwards. **Not done:** deployed (it needs `./start-docker up`, which interrupts a running render, and ships the rest of the uncommitted work); Audiobooks' delete button pressed for real (its dialog asks the audiobook tool first, which that backend did not run; the changed line is the same id swap as the other two). | `assistant/CLAUDE.md` -> Uploads, and the file store; layer 1b above |
+| 11-01 | **Layer 1b, phase A: markdown in the database, lent to a tool for one call (the user's decisions of 10-31: uploaded markdown goes into the database and docu-ai and apply-ai read it from there; the assistant owns the data and no tool gets the database).** An uploaded or drafted document is a `docs` row in `files` plus one `file_texts` row per file (`003_file_texts.sql`), written in one transaction, and nothing of it is on disk between calls. Every call to a tool runs inside `registry.lend(arguments)`: a document its arguments name (at any depth) gets a read-only copy under `ASSISTANT_TEXTS` for that call, with `.draft` in a draft's, removed when the call ends; two calls share one copy; leftovers are cleared on start. `read_document` and `write_draft` use the database directly. Uploads hold a batch in memory until done (20 MB, 5 open, an hour), refuse anything not UTF-8 or holding a NUL, and the old `docs/` folders are imported into the database and checked by hash. apply-ai's root is now the lend folder; in the containers it is `/tmp/assistant-texts`, not under `/data`. **Run for real** on a copy of the real uploads, a second backend (8760) with real docu-ai and apply-ai processes and a throwaway Postgres, the live containers untouched, 28 checks: the 4 drafts went in with the same SHA-256 per file as the originals and the same names, times and draft marks as the live listing, with nothing on disk; `read_document` returned a draft whole (7,244 characters); docu-ai previewed a draft and a two-file upload from lent copies; apply-ai refused a draft by its marker and read an upload's line as evidence; neither tool process had `DATABASE_URL` (read from `/proc`), the backend did; deleting removed the record and both texts; nothing was left lent. In Chrome as a phone on that backend, the Documents page uploaded two files, showed "What will be built" for them and for a real draft, and deleted the upload (9 checks). Thirteen deliberate breaks: twelve caught, one (a non-markdown record let into a lend) not observable, since such a record has no text and a second check lends nothing. **Not done:** deployed (as above). | `assistant/CLAUDE.md` -> Uploads, and the file store |
+| 11-01 | **Layer 1b, phase B: audiobook's finished work kept by the suite (shape A, the user's choice: the tool labels, the assistant files without knowing what it is, the page reads it back).** audiobook offers `inventory` and `release` (`keeping.py`); the assistant collects (`collect.py`) at start, after a call that changed something, and when a job finishes a chapter or ends; files go to the store (`kind made`), records to `records`/`record_files` (`004_records.sql`), and the tool lets go of finished audio once filed (hash-checked). A render now writes each chapter's exact spoken text beside its MP3. The page lists, plays (by file id), matches to chapters (by the tool's `stem`) and deletes through the records (`web/src/components/audiobookKept.ts`). **Run for real** in a container built from this code, on a copy of the real data (the 4 books, `output/`, voices, jobs) and a throwaway Postgres, the live containers untouched: all 105 audio files filed with their originals' SHA-256 and released (4 of them loose September tests at the top of `output/`, which the first inventory missed: found on the real data, fixed, filed by a restart that changed none of the other 116 records); 3 voices filed and left at the bench; 12 jobs filed with readable logs. In Chrome as a phone, the test page showed exactly what the live page shows: 5 books with the same audio counts and sizes, and for each book the same chapters with audio (2/2, 19/62, 36/37, 17/19), the same other files and the same 2 samples; a chapter played from the store by its id (one fetch, 623 s); deleting The Final Quest's audio removed its 7 kept files and nothing else; nothing wider than the window at 390 and 1066. Then a real render of one chapter (9 words, abigail) was filed with its exact text, voice, PDF and length, replaced the old kept copy (whose file left the store) and left nothing at the bench. Eighteen deliberate breaks, all caught, one only after a test was added (a link to the tool's own file was not tested). A test also found a real bug: a job's log read as text turned each progress update into a line. **Deployed 2026-11-01 (the user's "deploy")**, after copying `data/audiobook/output` to `output.before-phase-b` (117 files, 802 MB, checksums identical): the first live collection took 20 s and filed all 105 audio files with their SHA-256 verified against checksums taken before (0 problems), 3 voices, 12 jobs, 4 loose tests; the bench holds no audio, the 4 uploads untouched. **Found on the live page and fixed in a second deploy:** Dreams and Visions was titled "Praise for" for its first 5 seconds (an old chapter's MP3 tag, from an early wrong reading), because the tool no longer lists a book whose audio it has let go; the tool now hands over each book's title and author as a `book` record, which the page uses first, and it is deleted with the book's audio. **Chapters rendered before today have no text** (their MP3 tags only; today's plan may not be what they say). `plan.json` and `preview.md` stay at the bench as working files. | `assistant/CLAUDE.md` -> What tools made, kept; `audiobook/CLAUDE.md` -> The suite integration |
+
+Test counts on 2026-11-01, after layer 1b phase B (one `./test` run, all passed): assistant 329 + 14 Postgres tests that skip without `TEST_DATABASE_URL` (test_database, test_files and test_collect, 53 tests, all passed against a throwaway one), meet-ai 146, mail-ai 177, apply-ai 111, web-ai 149, audiobook 163, docu-ai 415 (+1 skipped, the live test), web 129 (+ typecheck), publish 15.
 
 ## Known rough edges
 
@@ -331,7 +345,7 @@ attached is made for the user to send through the two-press gate. Look at the ou
 
 ## Database, caching and multi-user — the architecture plan (2026-10-25)
 
-**Layer 1 is built (2026-10-28); layers 2 to 4 are decided, not built.** Each is its own piece of work;
+**Layer 1 is built (2026-10-28); layer 1b (one place for records and files, decided 2026-10-31) and layers 2 to 4 are decided, not built.** Each is its own piece of work;
 nothing here is started until the previous one is done and tested. Where layer 1 differs from the text below: the
 tests use the existing `asyncio.run` idiom, not `pytest-asyncio` (no new dependency); `DATABASE_URL` is built in
 `compose.yaml` from `POSTGRES_PASSWORD` (documented in `.env.example`) rather than written out there; the one-time
@@ -401,6 +415,175 @@ them to `.imported`. Runs once, automatically, inside the migration runner.
 **What does not change:** tools (still MCP child processes), the web app, the API shape (no frontend
 changes), the `./test` script, and the rule that no tool reads memory.
 
+### Layer 1b: one place for records and files (decided 2026-10-31, the user's call; not built)
+
+**Decided.** (1) Every record and every piece of text goes in PostgreSQL. (2) Audio, and any other file that is not
+text, stays a file, but in **one** file store for the whole suite, not in each tool's folder. (3) There are **no
+per-user folders on disk.** A file on the user's Google Drive is that user's own folder and stays there (the database
+holds its Drive id and link, never a copy). Everything else the system keeps for a user is a row with a `user_id`,
+and a file's owner is a column, never a folder name. This replaces layer 3's "per-user uploads folders".
+
+**Where things live today** (measured 2026-10-31):
+
+| What | Where now | Size | Goes to |
+|---|---|---|---|
+| Memory facts, audit log, sessions | Postgres | 16 facts, 859 audit rows | already there |
+| Uploaded books (PDF), recordings (webm), CV and letter folders | `data/assistant/uploads/` | 6.3 MB | file store |
+| Audiobook chapter text and plan (`plan.json`, `preview.md`) | `data/audiobook/output/<book>/` | about 550 KB for the book checked | database |
+| Audiobook audio (86 mp3, 1 m4b) | `data/audiobook/output/` | 539 MB | file store |
+| Voices: 3 samples, 3 model states, 2 metadata files | `data/audiobook/voices/` | 49 MB | files to the store, metadata to the database |
+| Audiobook jobs (10 records, 10 logs) | `data/audiobook/jobs/` | 0.6 MB | database |
+| Meeting audio (2 flac, 1 m4a, 2 small json) | `data/meet-ai/audio/` | 115 MB | file store |
+| Transcripts and timelines (7 md, 9 json, 4 logs) | `data/meet-ai/transcripts/` | 0.5 MB | database (the timeline as JSON) |
+| The mailbox (4,383 messages) | `data/mail-ai/mailbox.sqlite3` | 34 MB | database |
+| Built-document exports for email | `assistant/uploads/exports/` (empty today) | 0 | file store |
+| Spoken-chunk cache and Docling's cache | `data/audiobook/cache/` | 7.4 GB (5,584 sentences) and 8 MB on the evening of 10-31; 4.5 GB that morning, before the running render added to it | stays: a cache |
+| Whisper and Pocket TTS models | `data/cache/huggingface` | 1.8 GB | stays: downloads |
+| Google logins | `data/config`, each tool's `credentials.json` | about 40 KB | stays with its tool (the suite's rule) |
+
+**The design.**
+
+- **Database.** New numbered migrations, one per phase: `files`; then `books`, `chapters`, `voices`, `jobs`;
+  `recordings`, `transcripts` (with notes and minutes); `mail_messages`, `mail_sync`; `documents`. The names are
+  proposals: each phase reads the real data and the tool's own rules first, then writes its migration. Every table
+  has `user_id`, nullable until layer 3 makes it required, as `facts` has.
+- **File store.** One root, `data/files/`. **A file is kept at `<id>/<its own name>`**, not under its content hash
+  as first written here: tools use the name (docu-ai titles a Doc after its folder, audiobook names a book's audio
+  after its PDF, meet-ai a transcript after its recording), so it must survive exactly, and a folder per id keeps it
+  even when the same name is uploaded twice. One `files` row per file: `id`, `user_id`, `kind`, `name`, `bytes`,
+  `sha256`, `made_by` (user or assistant), `created_at` (`assistant/migrations/002_files.sql`). Local disk now; an
+  S3-style store later for a server is possible, not decided and not built. The API serves a file by its id
+  (`/api/files/<id>`), which is to replace serving by path from folders a tool declares (`files:` in `tools.yaml`,
+  `media_roots`) in phase B: an id says nothing about where a file is.
+- **How a tool reaches it: the assistant owns all of it (the user, 2026-10-31).** "The assistant" here is the backend program,
+  not the model: it runs with no model login or key, and every button already reaches its tool through it
+  (`/api/actions`), so this adds no dependence on the model. A tool never opens the database or the file
+  store. It works in its own scratch folder (working files and caches, safe to lose). When a job finishes, the
+  assistant takes what the job made, puts the files in the store and writes the rows. To give a tool a file to read,
+  the assistant hands it a path to a read-only copy (the local-disk store can give a real path; an S3-style store
+  would copy to scratch first). So "a path is all any tool takes" still holds, no tool changes its contract, no tool
+  gets `DATABASE_URL`, and the check on who owns what is made in one place. What it needs: each tool says what a job
+  produced. The audiobook and meeting jobs already record their outputs in their job files (to be checked per tool).
+- **Uploaded markdown goes into the database (the user, 2026-10-31).** The text itself goes in, not just a record of
+  the file, so the database holds its only lasting copy, and docu-ai and apply-ai read it from there: for each call
+  that names one, the assistant writes a read-only copy from the database and removes it when the call ends. The
+  user was told exactly that ("the copy is deleted afterwards"), so the copy is never a second place it lives.
+- **What stays out, on purpose.** Google logins (they stay with their tool). Caches that can be rebuilt: the
+  spoken-chunk cache (a stopped render loses nothing because of it) and Docling's cache (kept so a re-uploaded book is
+  already read), and the model downloads. Google Docs themselves (the user's own Drive).
+
+**Phases.** Each is its own piece of work; nothing starts until the one before is done, tested on the real data and
+approved.
+
+1. **A. The file store. Built 2026-10-31 and 11-01, deployed 2026-11-01** (see "Built and verified"). The `files` and
+   `file_texts` migrations, the store (`assistant/assistant/files.py`), uploads into it, markdown (uploads and drafts)
+   into the database and lent to a tool for one call (`texts.py`), delete and serve by id, and the old uploads folder
+   copied in once on start (2 recordings, 4 books, 4 draft folders on the real data). No tool changed; apply-ai reads
+   only where documents are lent.
+2. **B. Audiobooks. Built and deployed 2026-11-01** (see "Built and verified"), in shape A (question 6): finished
+   audio, voice samples and voices into the store; records with labels and text (each chapter's exact words from
+   now on), voices, corrections and jobs into the database; the Audiobooks page reads them and plays by file id. On
+   its first start it takes in the 105 audio files already there, checked by hash, and the tool lets go of them.
+3. **C. Meetings.** Recordings to the store; transcripts, timelines, notes and minutes to the database.
+4. **D. Mail.** The mailbox out of SQLite and into Postgres. The hard one: mail-ai's own search and thread listing
+   run over that file (`mailai/store.py`), so if the assistant owns the data those queries must move out of mail-ai,
+   or mail-ai needs its own database login limited to its own tables (question 2).
+5. **E. Documents.** Built-document records (Drive id, title, source text, builds) in the database; `save_export`
+   writes into the file store, and mail-ai attaches by path as now (decision 13 stands).
+6. **F. Multi-user (layer 3).** `user_id` required everywhere. Nothing per-user is left to move on disk.
+7. **G. The old folders** deleted, each only when the user says so.
+
+**Rules for every phase.** The Postgres precedent: a one-time import per source, never overwriting, checked by counts
+and hashes against the old files, the old ones renamed `.imported` and deleted only when the user says. `./test` still
+needs no database and no network (a temp-folder file store and in-memory stores, as now). Run for real on the real
+data. A container restart interrupts a running render, so nothing is deployed while one is going. **From phase A a
+backup must take `data/postgres` and `data/files` together**: the database alone would keep the records and lose the
+audio. `CLAUDE.md`'s "All state is in `./data`" and "the tools keep their own files" change when phases A and B land,
+not before.
+
+**Needs the user's answer.**
+
+1. **Who writes? Answered 2026-10-31: the assistant owns the data, and no tool gets the database.** The user's worry
+   was a tool depending on the model (an expired key); it does not, since the backend runs without one.
+2. **Mail (before D).** Same question for mail-ai, which queries its own store. Its notes name a full resync as the
+   fallback, so the mailbox looks rebuildable from Gmail; confirm that before treating the SQLite file as
+   disposable.
+3. **The spoken-chunk cache (7.4 GB) stays a cache in the audiobook folder. Answered yes, 2026-10-31.** Not in the
+   database or the store.
+4. **Local disk for the file store now, an S3-style store later** if it moves to a server (recommended). Needed
+   before A.
+5. **Order: A, then B** (recommended: audiobooks, because that is where this came from).
+6. **Phase B: where the knowledge of what a book is lives. Answered 2026-11-01: A, general records.** The tool
+   labels what it made; the assistant files it under those labels without knowing what a book is; the page,
+   which does know, reads them back. The same pattern for meetings (C) and mail (D). Explained to the user as a
+   workshop (the tool, working at its own bench) and a warehouse (the store and the database).
+
+**Phase B design (proposed 2026-11-01, not built).** Measured on the real data first:
+
+- **What audiobook keeps.** `output/<pdf name>/`: 86 MP3s and 1 M4B (655 MB with the voice samples), `plan.json`,
+  `preview.md` and `render.log` for some books, and stale MP3s from earlier readings (Dreams and Visions holds two
+  numberings side by side). `output/voices/`: 2 sample MP3s. `voices/`: 3 sample WAVs, 3 voice states
+  (`.safetensors`), 2 records (source recording, window, similarity, date; neither holds a consent statement:
+  both predate it). `voice/`: the 2 recordings voices were cloned from. `jobs/`: 12 jobs, a JSON and a log each
+  (792 KB). The caches (7.4 GB speech, 8 MB Docling) stay (answered).
+- **How it works.** A render is a detached process that runs for hours after the call that started it; it reads
+  the PDF, the corrections beside it and the voice by name when it starts, writes each chapter's MP3 as it
+  finishes, and the finished job lists its outputs (paths). The book's chapters and their exact text are worked
+  out on demand from Docling's cache and the corrections. The Audiobooks page asks the tool for everything (14
+  tools) and plays files by path from `output/`.
+- **What must hold.** Records and text in the database, audio in the store (the user). No tool gets the database
+  (answered). **A tool still works on its own** (the user: "i dont want any tool to rely on the assistant to
+  function"; and the suite's rule that every tool runs alone). And the assistant's own rule: no domain logic,
+  so it must not need to know what a chapter is.
+
+**Recommended shape:**
+
+1. **The tool keeps working in its own folders**, alone or in the suite. In the suite they are its working space:
+   finished audio stays there only until the assistant has taken it.
+2. **When a job finishes, the assistant takes what it made without knowing what it is.** The tool says, in a
+   general shape, which files the job produced and what each is (labels such as book, chapter, title, speed,
+   voice) and which records go with them (each chapter's exact spoken text, a voice's consent and source).
+   The assistant puts each file in the store and each record in one general table (tool, kind, key, labels,
+   text, the files it goes with), never reading inside them, then has the tool remove its copies. The watcher
+   that already notices a finished job is where this starts.
+3. **The page reads the database and plays by file id.** The page knows what a book is; the assistant does not.
+   It joins the tool's chapters (still worked out by the tool) with the stored audio by chapter.
+4. **What the tool needs to keep working stays a working copy**: a book's corrections and the voices. Their
+   lasting copy is in the database and the store (the page saves both, the tool's own copy and the record).
+5. **The existing audio is taken in once**, checked by hash, as the uploads were; the stale MP3s are kept as
+   "from an earlier reading", never deleted unasked.
+
+**How A works, concretely (the build, in this order):**
+
+- **Two agreed tool names, like `login_status`.** A tool that keeps things worth keeping offers a read-only
+  `inventory` (everything it holds that the warehouse should keep, each item `{kind, key, labels, text, version,
+  files: [{path, role}], release}`) and a `release` (delete these working copies, each named by path and the
+  SHA-256 the assistant filed; the tool checks the hash before deleting, so only a filed copy can go). Only the
+  names are agreed; a tool without them is not asked.
+- **The assistant collects** (`collect.py`): on start (which is also the one-time import of what is already
+  there), when the watcher sees one of the tool's jobs finish, and after any call to the tool that changed
+  something. An item whose version it already has is skipped. Otherwise each file is copied into the store
+  (checked by hash), the record is written or replaced under (tool, kind, key), a replaced record's old files
+  leave the store, and items marked `release` are released. One collection at a time.
+- **The database:** `records` (tool, kind, key unique together; labels as JSON; text; version; dates; `user_id`)
+  and `record_files` (which stored file plays which role); `files` gains the kind `made` (by a tool), never shown
+  among uploads. Generic endpoints for the page: list records by tool and kind, read one with its text, delete
+  some (and their files, audited). A read-only local tool lets the model see them too, since `preview_book`
+  stops listing audio the tool no longer holds.
+- **audiobook's items:** a chapter's MP3 (labels: book, PDF, number, title, speed, voice; the text is exactly
+  what that chapter says; released), the whole-book M4B (released), a voice sample MP3 (released), a voice (its
+  record, sample and state; kept as the tool's working copy, which it needs to render), a book's corrections
+  (text; kept beside the PDF, which the tool reads), each finished job (its labels and log; kept: small, and
+  `job_status` reads them). A chapter of a render still running is collected once its MP3 is finished, so it
+  can be played before the book is done, as now.
+- **The page** lists finished audio from the records, joins them to the tool's chapters by number and title
+  (what the tool's own matching did), plays and downloads by file id, and deletes a book's audio through the
+  records.
+
+**The alternative** is tables named for the domain (`books`, `chapters`, `voices`, `jobs`) in the assistant:
+easier to query, but the assistant then knows what a chapter is, and every change to audiobook's data needs a
+migration in the assistant. The same choice comes back for meetings (C) and mail (D).
+
 ### Layer 2: Redis (deferred to layer 3 on 2026-10-29, the user's call)
 
 **Not built, and not to be built before multi-user.** Measured on 2026-10-29 on a throwaway Postgres loaded with a
@@ -453,7 +636,7 @@ With Postgres holding sessions and facts per user, and the Google sign-in alread
 
 - A `users` table row created on first Google sign-in for an allowed email.
 - `user_id` becomes required on `facts`, `dossiers`, `audit_log`.
-- Per-user uploads folders (`data/assistant/uploads/<user_id>/`).
+- No per-user folders (decision 11, layer 1b): a file's owner is `user_id` on its `files` row, and its text is in the database.
 - The model's context (`as_prompt_block`) is scoped to the signed-in user.
 - `ASSISTANT_ALLOWED_EMAILS` grows from one address to a list.
 
@@ -528,13 +711,25 @@ when the prompt gets too big.
   - Only CVs and cover letters. Meeting minutes already have a quote rule; generalise when a second field
     needs the same piece.
 - **Storage for file uploads, and the rest.** Today `assistant/uploads/` is a local folder
-  (`assistant/CLAUDE.md`, Uploads). Moves to per-user folders under layer 3 (multi-user).
+  (`assistant/CLAUDE.md`, Uploads). **Decided 2026-10-31: one central file store and the database, no per-user
+  folders** (layer 1b above; phase A built, not deployed).
 - **User authentication.** The Google sign-in is built but not deployed (locked decision 9;
   `assistant/CLAUDE.md`, "Authentication"). Multi-user is layer 3 above.
 
 ## Waiting on the user
 
 Decisions or input only the user can give. Don't guess these.
+
+0. **Deployed 2026-11-01** (the user's yes), once the Myles Munroe render had finished (`[exit 0]`), with nothing else
+   running: 2026-10-31's work and layer 1b phase A. Checked live: the backend copied in 2 recordings, 4 books and 4
+   drafts (into the database) and renamed the old folders `.imported`; migrations 002 and 003 applied; each book's PDF
+   in `data/files` is byte-identical to its original; the tool still finds every book at its new path, read, with its
+   audio. Still open: **re-render Dreams and Visions** so its chapters get the new openings (the text is cached, so it
+   is the title chunks and the encode), and put an `ANTHROPIC_API_KEY` in `.env` before the end of November (Bedrock
+   ends then): `./auth --check` and Settings then say whether the key and `claude-opus-5-5` are accepted. **The Myles
+   Munroe book was read as two chapters** ("Opening" and a 6 h 40 min "Introduction"): its chapters were not found.
+0b. **Layer 1b phase B is deployed (2026-11-01).** The backup `data/audiobook/output.before-phase-b` (802 MB: every original
+   file as it was before) stays until the user says to delete it, as does `data/assistant/uploads/*.imported` from phase A.
 
 1. **Correct spellings** for the association meeting (places, officers, members, visitors — listed
    in the 2026-09-26 conversation; the minutes' footer flags them). Then: teach them with

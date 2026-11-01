@@ -95,8 +95,11 @@ address from your phone).
 
 1. Check once that Docker starts at boot: `systemctl is-enabled docker` should print `enabled`
    (if not, `sudo systemctl enable docker`).
-2. **Renew the AWS login each morning**: it lapses overnight, and until then the assistant cannot
-   think (Settings shows "AWS login needs renewing"). Run `./auth`, or just
+2. **The model**: put an `ANTHROPIC_API_KEY` in `.env` and run `./start-docker up`: no daily login, and it wins over
+   Bedrock when both are set. Settings asks Anthropic whether the key, and the model it will use, are accepted, and says
+   what to change if not (`SUITE_MODEL` in `.env` names another model). Only Chat and meeting notes need a model; every
+   other page works without one. **With Bedrock instead, renew the AWS login each morning**: it lapses overnight, and
+   until then the assistant cannot think (Settings shows "Signed out"). Run `./auth`, or just
    `aws sso login --profile ayadata-bedrock`. The Google logins last about a week.
 3. If it is not there: `./start-docker status` shows what is running; `./start-docker up` starts it.
 
@@ -119,6 +122,13 @@ Two images, as on the host: **backend** (the API *and* every tool, which are its
 **web** (the web app, still a separate program). All state lives in `./data`; the model's AWS login
 is read from `~/.aws`. Nothing is published beyond `127.0.0.1`. `up --audio` lets meet-ai record from
 this computer's microphone.
+
+**On a computer with an NVIDIA card**, transcribing (Whisper), speaking (Pocket TTS) and reading books
+(Docling) run on the card, found by itself: `./setup` and `./start-docker up` see the card's driver and
+install NVIDIA's builds of their libraries (about 4 GB more to download). The containers also need the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html);
+`./start-docker up` says so when it is missing, and runs on the CPU until then. `SUITE_GPU=cpu` in `.env`
+keeps everything on the CPU. Any other computer runs on the CPU, as before.
 
 **From your phone or another computer, over Tailscale.** Tailscale is a private network between
 your own devices: only devices signed in to your account can reach the suite, and to everyone else

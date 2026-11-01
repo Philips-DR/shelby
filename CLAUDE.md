@@ -113,6 +113,14 @@ The suite also runs in Docker, which is how it is reached from a phone or anothe
   the backend's own child processes over MCP on stdio, and a container boundary is not a reason to
   change that. The web app stays a separate program with its own image. `init: true` is not optional:
   detached renders and transcriptions are reparented to PID 1, which must reap them.
+- **An NVIDIA card is used when there is one, and only then (2026-10-31).** `./start-docker` adds
+  `compose.nvidia.yaml` (the image built with `GPU=nvidia`, the card handed to the backend) when `nvidia-smi`
+  answers and Docker has NVIDIA's runtime; a card Docker cannot reach is said once and the suite runs on the
+  CPU. `./setup` decides the same way for the host's environments. `SUITE_GPU=cpu|nvidia` overrides both. The
+  image carries no CUDA of its own: the driver is the host's, the rest pip packages (`meet-ai` and `audiobook`
+  `requirements-nvidia.txt`), and the code picks the device at run time, so a CPU machine's image and
+  behaviour are what they were. Never run on a GPU here (the laptop has none PyTorch can use): the package
+  sets were resolved, the detection was run against stand-ins, and the CPU path was run for real.
 - **All state is in `./data`** (git-ignored, owned by you, not by Docker's root): each tool's path comes
   from an environment variable in `compose.yaml`, which is the suite's own rule that paths are injected.
   audiobook is the exception, because it reads no setting for where its folders are, so the image
@@ -143,6 +151,14 @@ The suite also runs in Docker, which is how it is reached from a phone or anothe
   because one of its tests reads a fixed path in the author's home folder.
 - **What was run for real, and what was not:** see `plan.md` ("Built and verified"). The Tailscale
   sidecar needs a tailnet to run against, which cannot be faked.
+
+## The model is optional (2026-10-31)
+
+Only the assistant's chat and meet-ai's notes and minutes call a model. Mail, Meetings (recording, transcribing, reading),
+Documents and Audiobooks are buttons on tools that never touch one, so they work with no model login and no key: with the AWS
+login dead and no key, every tool answered and Settings said so (`assistant/CLAUDE.md` -> Every login at a glance). A model comes
+from an `ANTHROPIC_API_KEY` in `.env` (wins) or the Bedrock profile; Bedrock ends at the end of November. Settings treats "no model
+set up" as information, not as something needing attention.
 
 ## Settings
 
@@ -188,8 +204,11 @@ A tool's own paths stay in `assistant/tools.yaml`, the one file that knows every
   restarting the backend does not stop it (and the restarted backend sees it), so `pkill` it
   explicitly if a test render must end.
 - **Logins lapse: AWS SSO overnight, the Google tokens weekly** (the OAuth app is in "Testing").
-  `./auth --check` tells which, without a browser — Settings cannot, since it judges a tool by its
-  last call, which may be days old. Only the user can renew them (`./auth`, needs a browser).
+  `./auth --check` tells which, without a browser. Settings now can too (2026-10-31): mail-ai and docu-ai
+  each offer a read-only `login_status` that asks Google whether *their own* token (the container's copy, the one
+  that matters) still works, and the page says "Signed out of Gmail" with the one command, `./auth`; before, it
+  judged a tool by its last call, which may be days old. The sidebar's model dot goes red and says "Signed out" the
+  same way (`assistant/CLAUDE.md` -> Every login at a glance). Only the user can renew them (`./auth`, needs a browser).
   **The containers hold their own copy of each Google token** (`data/config`), which renewing on the host did
   not touch: on 2026-10-15 every build in the container failed with `invalid_grant` on a token Google had let
   lapse two weeks earlier. `./auth` now copies a login that is good on the host into `data/config` when the
