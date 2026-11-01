@@ -16,6 +16,7 @@ import type { Section } from './ui/sections'
 import { usePlayer } from './player/engine'
 import { MiniPlayer } from './ui/MiniPlayer'
 import { MoreSheet, Sidebar, TabBar, TopBar } from './ui/Shell'
+import { useLayer } from './ui/useLayer'
 import { useRoute } from './ui/useRoute'
 import { useTheme } from './ui/useTheme'
 
@@ -54,8 +55,13 @@ export function App() {
   const { pending } = useAppState()
   const [section, go] = useRoute()
   const [theme, cycleTheme, setTheme] = useTheme()
-  const [palette, setPalette] = useState(false)
-  const [more, setMore] = useState(false)
+  // The More sheet and the search box are one slot: only one is open at a time, going from one to the other is a swap,
+  // and Back closes whichever is open before it leaves the page (useLayer.ts).
+  const [overlay, setOverlay] = useState<'more' | 'palette' | null>(null)
+  useLayer('overlay', overlay, setOverlay, true)
+  const palette = overlay === 'palette'
+  const more = overlay === 'more'
+  const closeOverlay = useCallback(() => setOverlay(null), [])
 
   // Not authenticated yet: the whole app waits behind the Connect / Sign-in screen.
   // Always check /api/me first: when Google auth is configured, a session cookie is required
@@ -90,14 +96,14 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setPalette((open) => !open)
+        setOverlay((now) => (now === 'palette' ? null : 'palette'))
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const openPalette = useCallback(() => setPalette(true), [])
+  const openPalette = useCallback(() => setOverlay('palette'), [])
   const inChat = section === 'chat'
   // While anything is loaded the shell keeps room at the foot of the page for the docked player, whether or
   // not it is showing: room that came and went as the dock did would shift the page under your finger.
@@ -123,9 +129,9 @@ export function App() {
         </main>
       </div>
       <MiniPlayer goToBooks={() => go('audiobooks')} />
-      <TabBar section={section} go={go} openMore={() => setMore(true)} />
-      <MoreSheet open={more} onClose={() => setMore(false)} section={section} go={go} theme={theme} setTheme={setTheme} onSearch={openPalette} />
-      <CommandPalette open={palette} onClose={() => setPalette(false)} go={go} setTheme={setTheme} pending={pending.length} />
+      <TabBar section={section} go={go} openMore={() => setOverlay('more')} />
+      <MoreSheet open={more} onClose={closeOverlay} section={section} go={go} theme={theme} setTheme={setTheme} onSearch={openPalette} />
+      <CommandPalette open={palette} onClose={closeOverlay} go={go} setTheme={setTheme} pending={pending.length} />
       <Notices />
     </div>
   )

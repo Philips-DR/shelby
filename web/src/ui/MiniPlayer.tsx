@@ -4,6 +4,7 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
 import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock } from '../player/engine'
 import { clock, spoken } from '../player/format'
+import { askToShow } from '../player/showing'
 import { IconAudiobooks, IconClose, IconForward, IconPause, IconPlay, IconRewind } from './icons'
 import { toolColor } from '../charts/palette'
 import '../styles/player.css'
@@ -18,6 +19,13 @@ export function MiniPlayer({ goToBooks }: { goToBooks: () => void }) {
   useEffect(() => (visible && root.current ? act.paintInto(root.current) : undefined), [act, visible])
 
   if (!track || !visible) return null
+  // Tapping it goes to where the audio is playing: the book, with that chapter in view. A file with no book of its
+  // own (the whole-book audio) has nowhere more particular than the page.
+  const show = () => {
+    if (track.home) askToShow(track.home)
+    goToBooks()
+  }
+  const where = track.home ? 'Show it playing in its book' : 'Open the audiobooks page'
   const loading = waiting && !playing && !failed
   return (
     <div
@@ -29,7 +37,7 @@ export function MiniPlayer({ goToBooks }: { goToBooks: () => void }) {
       style={{ '--pa': toolColor('audiobook') } as CSSProperties}
     >
       <span className="mini-line" aria-hidden><i /></span>
-      <button className="mini-info" onClick={goToBooks} title="Open the audiobooks page" aria-label={`${track.title}. Open the audiobooks page`}>
+      <button className="mini-info" onClick={show} title={where} aria-label={`${track.title}. ${where}`}>
         <span className="mini-tile" aria-hidden>
           {playing ? <span className="mini-eq"><i /><i /><i /></span> : <IconAudiobooks size={17} strokeWidth={2} />}
         </span>

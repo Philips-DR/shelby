@@ -5,29 +5,24 @@
 // A banner says the verdict first; the model, the network and each tool follow as cards, so the
 // thing that needs attention is found by its state (icon and word), not by reading.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react'
-import { getHistory, getMe, getStatus, signOut, toolLabel, type AuditRow, type AuthInfo, type Level, type Status } from '../api'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { getHistory, getMe, getStatus, signOut, type AuditRow, type AuthInfo, type Level, type Status } from '../api'
 import { DataTable } from '../charts/ChartCard'
-import { toolColor, toolName } from '../charts/palette'
+import { isTool, toolColor, toolName } from '../charts/palette'
 import { Sparkline } from '../charts/Sparkline'
+import { isSignedOut, joinNames, loginOf, serviceOf, signedOutNames } from '../loginState'
 import { dayKey, lastDays } from '../pages/overviewData'
+import { useAppState } from '../state'
 import { CardHead } from '../ui/CardHead'
 import { Empty } from '../ui/Empty'
-import { IconAlert, IconAudiobooks, IconChart, IconChat, IconCheck, IconClock, IconCopy, IconDocuments, IconFail, IconMail, IconMeetings, IconOk, IconRefresh, IconSend, IconSettings, IconSpark, IconSystem, IconTable } from '../ui/icons'
+import { IconAlert, IconChart, IconCheck, IconClock, IconCopy, IconFail, IconOk, IconRefresh, IconSend, IconSettings, IconSpark, IconSystem, IconTable } from '../ui/icons'
 import { ago } from '../ui/time'
+import { TOOL_ICON } from '../ui/toolMeta'
+import { NET_WORDS, actionTitle, ipv6Absent, issueChips, networkTable } from './settingsText'
 import '../styles/panels/settings.css'
 
-type Icon = ComponentType<{ size?: number; strokeWidth?: number; 'aria-hidden'?: boolean }>
 type ToolStatus = Status['tools'][number]
 type Net = NonNullable<Status['network']>[number]
-
-const TOOL_ICON: Record<string, Icon> = {
-  'meet-ai': IconMeetings,
-  'docu-ai': IconDocuments,
-  'mail-ai': IconMail,
-  assistant: IconChat,
-  audiobook: IconAudiobooks,
-}
 
 const USAGE_DAYS = 14
 const USAGE_LIMIT = 2000
@@ -43,7 +38,7 @@ function Health({ level, words }: { level: Level | undefined; words: Record<Leve
 }
 
 const TOOL_WORDS: Record<Level, string> = { ok: 'Healthy', warning: 'Check', error: 'Needs attention' }
-const NET_WORDS: Record<Level, string> = { ok: 'Reachable', warning: 'Slow or partial', error: 'Unreachable' }
+const SIGNED_OUT_WORDS: Record<Level, string> = { ...TOOL_WORDS, error: 'Signed out' }
 const MODEL_WORDS: Record<Level, string> = { ok: 'Signed in', warning: 'Check', error: 'Not reachable' }
 
 function Outcome({ outcome }: { outcome: string }) {
@@ -102,13 +97,55 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   )
 }
 
-/** Text with `commands` in backticks: the commands become <code>, everything else stays text. */
-function withCode(text: string): ReactNode[] {
-  return text.split('`').map((part, i) => (i % 2 === 1 ? <code key={i}>{part}</code> : <span key={i}>{part}</span>))
+/** The raw error, folded away: it is for someone reporting a problem, not for the person reading the page. */
+function Details({ text }: { text: string | undefined }) {
+  if (!text) return null
+  return (
+    <details className="set-fold">
+      <summary>Technical detail</summary>
+      <p className="small mono">{text}</p>
+    </details>
+  )
 }
-const firstCommand = (text: string): string | null => (text.split('`')[1] ?? null) || null
 
 // ---- the verdict -----------------------------------------------------------------------------------
+
+/** The one fix for every login that is out, where it cannot be missed: the same command whichever login it is. */
+function SignInAgain({ names }: { names: string[] }) {
+  return (
+    <div className="set-fix" role="group" aria-label="How to sign in again">
+      <p><b>Signed out of {joinNames(names)}.</b> Run this in the suite folder. It opens a browser for each login that needs it and leaves the others alone.</p>
+      <div className="set-fix-run">
+        <code>./auth</code>
+        <CopyButton text="./auth" />
+      </div>
+      <p className="muted small">Then press Check now.</p>
+    </div>
+  )
+}
+
+/** An API key is replaced in `.env`, not renewed by a browser, so its fix is its own: what to change, then the one command. */
+function ModelFix({ model }: { model: Status['model'] }) {
+  const kind = loginOf(model)
+  if (kind !== 'key-refused' && kind !== 'model-missing') return null
+  return (
+    <div className="set-fix" role="group" aria-label="How to fix the model">
+      {kind === 'key-refused' ? (
+        <p><b>The Anthropic API key was refused.</b> Put a working key in <code>.env</code> as <code>ANTHROPIC_API_KEY=…</code>, then run this in the suite folder:</p>
+      ) : (
+        <p>
+          <b>This API key cannot use the model {model.model}.</b> {model.available?.length ? <>It can use {joinNames(model.available)}. </> : ''}
+          Set <code>SUITE_MODEL=…</code> in <code>.env</code> to one it can, then run this in the suite folder:
+        </p>
+      )}
+      <div className="set-fix-run">
+        <code>./start-docker up</code>
+        <CopyButton text="./start-docker up" />
+      </div>
+      <p className="muted small">Then press Check now.</p>
+    </div>
+  )
+}
 
 function Verdict({ status, checking, checkedAt, error, onCheck }: {
   status: Status
@@ -117,10 +154,9 @@ function Verdict({ status, checking, checkedAt, error, onCheck }: {
   error: string
   onCheck: () => void
 }) {
-  const issues: string[] = []
-  if (status.model.level === 'error' || status.model.level === 'warning') issues.push('Model login')
-  for (const n of status.network ?? []) if (n.level !== 'ok') issues.push(n.name)
-  for (const t of status.tools) if (t.level !== 'ok') issues.push(t.name)
+  const issues = issueChips(status)
+  const signedOut = signedOutNames(status)
+  const noModel = loginOf(status.model) === 'not-set-up'
 
   const settled = status.model.level !== undefined || status.network !== undefined
   // The instant view and the live check run back to back: until one has answered, say so rather than "not checked".
@@ -143,13 +179,17 @@ function Verdict({ status, checking, checkedAt, error, onCheck }: {
         <h2>{headline}</h2>
         {issues.length > 0 ? (
           <ul className="set-issues" aria-label="Needs attention">
-            {issues.map((name) => <li key={name} className="badge bad"><IconAlert size={14} aria-hidden />{name}</li>)}
+            {issues.map((chip) => <li key={chip} className="badge bad"><IconAlert size={14} aria-hidden />{chip}</li>)}
           </ul>
         ) : (
           <p className="muted small">
-            {state === 'ok' ? 'The model login, the network and every tool answered.' : 'Press Check now to test the model login and the network.'}
+            {state === 'ok'
+              ? `Every login, the network and every tool answered.${noModel ? ' No model is set up, so Chat and meeting notes are off; everything else works.' : ''}`
+              : 'Press Check now to test every login and the network.'}
           </p>
         )}
+        {signedOut.length > 0 && <SignInAgain names={signedOut} />}
+        <ModelFix model={status.model} />
         {error && <p className="error small" role="alert">{error}</p>}
       </div>
       <div className="set-verdict-side">
@@ -170,11 +210,18 @@ function Verdict({ status, checking, checkedAt, error, onCheck }: {
 // ---- the model ------------------------------------------------------------------------------------
 
 function ModelCard({ model, checking }: { model: Status['model']; checking: boolean }) {
-  const command = model.hint ? firstCommand(model.hint) : null
+  const kind = loginOf(model)
+  const words: Record<Level, string> =
+    kind === 'signed-out' ? SIGNED_OUT_WORDS
+      : kind === 'key-refused' ? { ...MODEL_WORDS, error: 'Key refused' }
+        : kind === 'model-missing' ? { ...MODEL_WORDS, error: 'Model unavailable' }
+          : MODEL_WORDS
   return (
     <section className="card set-model">
-      <CardHead icon={IconSpark} tool="assistant" title="Model" sub="The login the assistant thinks with.">
-        <Health level={model.level} words={MODEL_WORDS} />
+      <CardHead icon={IconSpark} tool="assistant" title="Model" sub="What the assistant thinks with. Only Chat and meeting notes need it.">
+        {kind === 'not-set-up'
+          ? <span className="badge"><IconClock size={14} aria-hidden />Not set up</span>
+          : <Health level={model.level} words={words} />}
       </CardHead>
 
       <dl className="set-facts">
@@ -184,16 +231,32 @@ function ModelCard({ model, checking }: { model: Status['model']; checking: bool
         {model.region && <div><dt>Region</dt><dd className="mono">{model.region}</dd></div>}
       </dl>
 
-      {model.level === 'ok' && model.account && (
-        <p className="set-note ok"><IconOk size={16} aria-hidden /><span>Signed in to account {model.account}{model.role ? ` as ${model.role}` : ''}.</span></p>
+      {model.level === 'ok' && (
+        <p className="set-note ok">
+          <IconOk size={16} aria-hidden />
+          <span>{model.account ? `Signed in to account ${model.account}${model.role ? ` as ${model.role}` : ''}.` : (model.detail ?? 'Working.')}</span>
+        </p>
+      )}
+      {kind === 'not-set-up' && (
+        <p className="set-note">
+          <IconClock size={16} aria-hidden />
+          <span>
+            <b>No model is set up.</b> Chat and meeting notes need one; every other page works without. To add one, put <code>ANTHROPIC_API_KEY=…</code> in <code>.env</code> and run <code>./start-docker up</code>.
+          </span>
+        </p>
       )}
       {model.level === 'error' && (
         <div className="set-note bad">
           <IconFail size={16} aria-hidden />
           <div>
-            <p>Can’t reach the model: {model.detail}</p>
-            {model.hint && <p className="set-hintline">{withCode(model.hint)}</p>}
-            {command && <CopyButton text={command} />}
+            {kind === 'signed-out'
+              ? <p><b>Signed out.</b> The model’s login has expired, so the assistant cannot answer until you sign in again. The fix is at the top of this page.</p>
+              : kind === 'key-refused'
+                ? <p><b>Key refused.</b> Anthropic did not accept the API key, so the assistant cannot answer until it is replaced. The fix is at the top of this page.</p>
+                : kind === 'model-missing'
+                  ? <p><b>Model not available.</b> This key cannot use {model.model}. The fix is at the top of this page.</p>
+                  : <p><b>Cannot reach the model.</b> Check the network connection, then press Check now.</p>}
+            <Details text={model.detail} />
           </div>
         </div>
       )}
@@ -233,18 +296,10 @@ function NetworkCard({ network, checking }: { network: Net[] | undefined; checki
     const values = (network ?? []).flatMap((n) => [n.ipv4_ms, n.ipv6_ms]).filter((v): v is number => v != null)
     return Math.max(1, ...values) * 1.18 // room for the value at the end of the longest bar
   }, [network])
+  // No service answered over IPv6: say so once, and draw only what answered, rather than a "no answer" line per service.
+  const noV6 = !!network && ipv6Absent(network)
 
-  const table = (
-    <DataTable
-      head={['Service', 'IPv4', 'IPv6', 'Verdict']}
-      rows={(network ?? []).map((n) => [
-        `${n.name} (${n.host})`,
-        n.ipv4_ms != null ? `${n.ipv4_ms} ms` : `No answer${n.ipv4_error ? `: ${n.ipv4_error}` : ''}`,
-        n.ipv6_ms != null ? `${n.ipv6_ms} ms` : `No answer${n.ipv6_error ? `: ${n.ipv6_error}` : ''}`,
-        n.verdict,
-      ])}
-    />
-  )
+  const table = networkTable(network ?? [])
 
   return (
     <section className="card set-network">
@@ -261,14 +316,20 @@ function NetworkCard({ network, checking }: { network: Net[] | undefined; checki
         <p className="set-note"><IconClock size={16} aria-hidden /><span>{checking ? 'Testing connections…' : 'Not checked yet.'}</span></p>
       )}
       {network && network.length === 0 && <p className="muted">No services are being tested.</p>}
-      {network && network.length > 0 && view === 'table' && <div className="table-wrap">{table}</div>}
+      {network && network.length > 0 && view === 'table' && (
+        // Focusable, so a keyboard can scroll it when a narrow window makes it wider than the card.
+        <div className="table-wrap" tabIndex={0} role="region" aria-label="Connection times, as a table">
+          <DataTable head={table.head} rows={table.rows} />
+        </div>
+      )}
       {network && network.length > 0 && view === 'chart' && (
         <div className="set-net">
           <ul className="set-legend" aria-label="Legend">
             <li><i className="swatch" style={{ background: 'var(--seq-strong)' }} aria-hidden />IPv4</li>
-            <li><i className="swatch" style={{ background: 'var(--seq-soft)' }} aria-hidden />IPv6</li>
+            {!noV6 && <li><i className="swatch" style={{ background: 'var(--seq-soft)' }} aria-hidden />IPv6</li>}
             <li className="muted">Shorter is faster</li>
           </ul>
+          {noV6 && <p className="small muted set-no6">No IPv6 on this connection, so every service is reached over IPv4. That is normal.</p>}
           <ul className="set-services">
             {network.map((n) => (
               <li key={n.host} className="set-service">
@@ -283,7 +344,7 @@ function NetworkCard({ network, checking }: { network: Net[] | undefined; checki
                   </div>
                 </div>
                 <Pair label="IPv4" ms={n.ipv4_ms} error={n.ipv4_error} color="var(--seq-strong)" top={top} />
-                <Pair label="IPv6" ms={n.ipv6_ms} error={n.ipv6_error} color="var(--seq-soft)" top={top} />
+                {!noV6 && <Pair label="IPv6" ms={n.ipv6_ms} error={n.ipv6_error} color="var(--seq-soft)" top={top} />}
               </li>
             ))}
           </ul>
@@ -296,8 +357,11 @@ function NetworkCard({ network, checking }: { network: Net[] | undefined; checki
 // ---- the tools -----------------------------------------------------------------------------------
 
 function ToolRow({ tool, mailCompose, daily, perUse, index }: { tool: ToolStatus; mailCompose: boolean; daily: number[] | null; perUse: boolean; index: number }) {
-  const Glyph = TOOL_ICON[tool.name] ?? IconSettings
+  const { titles } = useAppState()
+  const Glyph = isTool(tool.name) ? TOOL_ICON[tool.name] : IconSettings
   const last = tool.last_call
+  const out = isSignedOut(tool.login?.state)
+  const service = serviceOf(tool)
   return (
     <li className="set-tool" style={{ '--tile': toolColor(tool.name), '--i': index } as CSSProperties}>
       <span className="navtile"><Glyph size={18} strokeWidth={2} aria-hidden /></span>
@@ -306,21 +370,33 @@ function ToolRow({ tool, mailCompose, daily, perUse, index }: { tool: ToolStatus
         <span className="muted small"><span className="mono">{tool.name}</span> · {tool.tools} tools</span>
       </div>
       <div className="set-tool-badges">
-        <Health level={tool.level} words={TOOL_WORDS} />
+        <Health level={tool.level} words={out ? SIGNED_OUT_WORDS : TOOL_WORDS} />
         {tool.name === 'mail-ai' && (
           <span className={`badge ${mailCompose ? 'chip' : ''}`}><IconSend size={13} aria-hidden />Drafting {mailCompose ? 'on' : 'off'}</span>
         )}
       </div>
       <div className="set-tool-last">
+        {out && (
+          <div className="set-login bad">
+            <p className="set-login-line"><IconFail size={14} aria-hidden /><span>{tool.login!.state === 'missing' ? `${service} has not been signed in yet.` : `${service} refused the saved login.`}</span></p>
+            <Details text={tool.login!.detail} />
+          </div>
+        )}
+        {tool.login?.state === 'unknown' && (
+          <div className="set-login">
+            <p className="set-login-line muted"><IconClock size={14} aria-hidden /><span>Could not check the {service} login just now.</span></p>
+            <Details text={tool.login.detail} />
+          </div>
+        )}
         {last ? (
           <>
-            <span className="set-eyebrow">Last call</span>
+            <span className="set-eyebrow">Last action</span>
             <p className="set-last-line">
-              <span className="mono">{toolLabel(last.tool)}</span>
+              <span>{actionTitle(last.tool, titles)}</span>
               <Outcome outcome={last.outcome} />
               <time dateTime={new Date(last.at).toISOString()} className="muted small" title={ago(last.at)}>{stamp(last.at)}</time>
             </p>
-            {last.error && <p className={`set-last-error small ${tool.level === 'ok' ? 'muted' : 'warn'}`}>{last.error}</p>}
+            {last.error && <Details text={last.error} />}
           </>
         ) : (
           <p className="muted">Not used yet.</p>
@@ -369,19 +445,23 @@ export function Settings() {
   const [usage, setUsage] = useState<AuditRow[] | null>(null)
   const [auth, setAuth] = useState<AuthInfo | null>(null)
   const [, tick] = useState(0)
+  const { refreshLogin } = useAppState()
 
   const check = useCallback(async (live: boolean) => {
     setChecking(live)
     setError('')
     try {
       setStatus(await getStatus(live))
-      if (live) setCheckedAt(Date.now())
+      if (live) {
+        setCheckedAt(Date.now())
+        void refreshLogin() // the sidebar reads what this check just found
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setChecking(false)
     }
-  }, [])
+  }, [refreshLogin])
 
   // Instant view first, then the live checks, which each cost a round trip.
   useEffect(() => {
@@ -443,7 +523,7 @@ export function Settings() {
       </div>
 
       <section className="card set-tools" aria-label="Tools">
-        <CardHead icon={IconSettings} title="Tools" sub="Each tool's health is read from how its own calls have gone.">
+        <CardHead icon={IconSettings} title="Tools" sub="Whether each tool's login still works, and how its last action went.">
           <span className="muted small">{status.tools.length} connected</span>
         </CardHead>
         {status.tools.length === 0 ? (
@@ -469,13 +549,16 @@ export function Settings() {
         </aside>
       )}
 
-      <aside className="set-auth" aria-label="Signing back in">
-        <IconAlert size={18} aria-hidden />
-        <p className="hint">
-          Signed out of something? Run <code>./auth</code> in the suite folder: it checks every login and renews only the dead ones.
-        </p>
-        <CopyButton text="./auth" />
-      </aside>
+      {/* When a login is out the fix is in the banner above; this is for the times nothing says so. */}
+      {signedOutNames(status).length === 0 && (
+        <aside className="set-auth" aria-label="Signing back in">
+          <IconAlert size={18} aria-hidden />
+          <p className="hint">
+            Signed out of something? Run <code>./auth</code> in the suite folder: it checks every login and renews only the dead ones.
+          </p>
+          <CopyButton text="./auth" />
+        </aside>
+      )}
     </div>
   )
 }

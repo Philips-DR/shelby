@@ -33,6 +33,24 @@
 .set-verdict-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .set-checked { text-align: right; }
 
+/* ---- the one fix for a login that is out, in the banner ---------------------------------------------------- */
+
+.set-fix { margin-top: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: var(--bad-soft); border-radius: 12px; font-size: var(--fs-sm); }
+.set-fix p { overflow-wrap: anywhere; }
+.set-fix-run { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.set-fix-run code { padding: 8px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-control); font-size: var(--fs-md); }
+.set-fix .set-copy button { min-height: 40px; }
+
+/* the raw error, folded away: it is for someone reporting a problem, not for reading */
+.set-fold { margin-top: 4px; }
+.set-fold > summary { display: flex; align-items: center; min-height: 40px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 650; cursor: pointer; }
+.set-fold p { margin: 0 0 6px; color: var(--ink-2); overflow-wrap: anywhere; }
+.set-login { margin-bottom: 10px; }
+.set-login-line { display: flex; align-items: flex-start; gap: 6px; overflow-wrap: anywhere; }
+.set-login-line > svg { flex: none; margin-top: 3px; }
+.set-login.bad .set-login-line > svg { color: var(--bad); }
+.set-no6 { margin: 2px 0 8px; }
+
 /* ---- the model and the network, side by side when there is room -------------------------------------- */
 
 .set-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: stretch; }
@@ -68,7 +86,7 @@
 .set-note.bad > svg { color: var(--bad); }
 .set-note p + p { margin-top: 6px; }
 .set-hintline { overflow-wrap: anywhere; }
-.set-hintline code { background: var(--surface); }
+.set-hintline code, .set-note code { background: var(--surface); }
 .set-note .set-copy { margin-top: 8px; }
 
 /* ---- latency: IPv4 and IPv6 as an ordinal pair on one scale -------------------------------------------- */

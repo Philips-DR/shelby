@@ -72,7 +72,7 @@ function UploadRow({ docs, index, startOpen, onBuilt, onDeleted }: {
     setRemoving(true)
     setRemoveError('')
     try {
-      await deleteUpload('docs', docs.name)
+      await deleteUpload(docs.id)
       setAsking(false)
       onDeleted()
     } catch (e) {

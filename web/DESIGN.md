@@ -41,6 +41,25 @@ content max width is 1200px; the gutter is `--gutter` (16/24/32px). Use `.grid-2
 (wide + narrow) for card layouts; they collapse on their own. **Pick a column count the items fill**: an
 odd card left alone on a row is a bug.
 
+## Back (`ui/useRoute.ts`, `ui/useLayer.ts`)
+
+A page is the URL hash, so changing page is a history entry and Back goes to the page before. Anything that opens
+*inside* a page (a book on Audiobooks, a message in Mail, a meeting on a phone, the More sheet, the search box) was
+only React state, so Back skipped it: from an open book it went to Chat, if that was where you had come from, and
+the More sheet stayed open over the page it landed on (reproduced in Chrome as a phone, 2026-10-31). Such a thing is
+now a **layer**: `useLayer(key, value, set)` keeps its value in `history.state`, so opening pushes an entry, Back
+closes it, the on-screen "All books" button goes Back too (the same history either way), and leaving for another
+page and coming Back finds it open again. Rules for the next one:
+
+- **Use it where a thing takes the page's place or sits over it.** Not for an accordion or text that opens inline
+  (a chapter's text, "Upload audio"): those are part of the page, and Back leaving the page is right.
+- **Only where it is a layer.** Meetings opens its newest meeting by itself when the list and the meeting sit side
+  by side, so there it is not a layer (a history entry for it would make Back re-open it for ever): the call is
+  gated on `!wide`.
+- **A sheet or search box is `modal`**: choosing a page from it replaces its entry (`go()`), so Back from that
+  page goes to the page you were on, not to the sheet.
+- **Not a layer yet:** the delete confirmation (`ConfirmDelete`) and a chapter's text; Back from either leaves the page.
+
 ## Building blocks
 
 | Need | Use |
@@ -56,6 +75,7 @@ odd card left alone on a row is a bug.
 | Drop files on a card | `<DropZone accepts onFiles label>` (`ui/DropZone`) plus `PickFiles` (`components/Upload`) |
 | Ask before deleting | `<ConfirmDelete title facts keeps verb ready busy error onConfirm onCancel>` (`ui/ConfirmDelete`): says what goes and what is not touched, Cancel has the focus, the delete button waits until `ready`. It is drawn into `<body>` through a portal: inside a card whose entrance animates `transform`, a `position: fixed` dialog is fixed to the card, and its button presses the row underneath (found live) |
 | Play audio | `open({key, title, blob})` from `usePlayerActions()` (`player/engine`); the page shows `<AudioPlayer onClose>` (`ui/AudioPlayer`) for the current file. Never an `<audio>` of your own: the one player lives above the pages, so playback survives moving between them, and `ui/MiniPlayer` docks it when the full one is not in view |
+| Something that opens over a page (a book, a message, a sheet) | `useLayer(key, value, set)` (`ui/useLayer`), so the phone's Back closes it: see "Back" below |
 | Icons | import from `ui/icons.ts` only (lucide). 16px in buttons, 17–20px in tiles. `aria-hidden` on decoration |
 | Tables | `<div className="table-wrap stack-rows"><table>…`, with `data-label="Column"` on each `<td>`: on a phone each row becomes a stacked block |
 | Forms | plain `input`, `select`, `textarea`, `button` are already styled; `.row` lays controls out, `.stack` stacks them |
@@ -98,7 +118,10 @@ on every point. Categorical colour slots are fixed and validated (`charts/palett
 ## Tool identity colours
 
 meet-ai `--s1` blue · docu-ai `--s2` orange · mail-ai `--s3` aqua · assistant `--s4` yellow ·
-audiobook `--s5` magenta. Use `toolColor(name)`; for a tinted tile use `style={{'--tile': toolColor(tool)}}`
+audiobook `--s5` magenta · apply-ai (Applications) `--s6` green · web-ai (Web) `--s7` purple. The last two have no page of
+their own, so they show on Settings, in approvals and, once used, on the Overview. Slot 6 is a green close to the UI's "ok": a tool
+that wears it is always named and iconed beside it, never told apart by colour alone. Slot 8 is the UI's red and stays unused.
+Use `toolColor(name)`; for a tinted tile use `style={{'--tile': toolColor(tool)}}`
 on a `.navtile`.
 
 ## Theme

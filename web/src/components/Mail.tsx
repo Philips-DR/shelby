@@ -14,6 +14,7 @@ import { toolColor } from '../charts/palette'
 import { useAppState } from '../state'
 import { ConfirmDelete } from '../ui/ConfirmDelete'
 import { Empty } from '../ui/Empty'
+import { useLayer } from '../ui/useLayer'
 import {
   IconAlert, IconBack, IconCheck, IconChevron, IconDocuments, IconMail, IconOk, IconPlus, IconRefresh, IconSearch, IconSend, IconTrash,
 } from '../ui/icons'
@@ -595,6 +596,15 @@ export function Mail() {
   }
 
   const openPane = (next: Pane) => { setPane(next); setView('pane') }
+  // Back from a message or the composer closes it (useLayer.ts). Where the list is hidden behind it, that shows the list;
+  // where the two sit side by side nothing else would change, so the pane is emptied too.
+  useLayer('mail-pane', view === 'pane' ? pane : null, (to) => {
+    if (to) { setPane(to); setView('pane') }
+    else {
+      setView('list')
+      if ((listCard.current?.getClientRects().length ?? 1) > 0) setPane(null)
+    }
+  })
   const back = () => {
     setView('list')
     requestAnimationFrame(() => listCard.current?.querySelector<HTMLElement>('[aria-current="true"]')?.focus())

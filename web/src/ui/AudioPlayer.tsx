@@ -5,15 +5,18 @@
 //     see the time. A file too big to decode gets a plain progress track instead, never a fake waveform.
 //   - Skip back 15 s and forward 30 s, playback speed, a sleep timer that fades out, volume. Where you
 //     stopped is remembered per file, in this browser only.
+//   - A chapter of a book also has previous and next buttons (dimmed at the first and last chapter), the
+//     same two the headphones and lock screen use.
 //   - Keyboard: arrows seek (Shift: more), PageUp/PageDown a minute, Home/End, Space plays and pauses.
 //     The seek bar is a real slider to a screen reader, its position said in words.
+//   - A chapter of a book says which chapter comes next, with a switch for whether it starts by itself.
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { useWidth } from '../charts/useWidth'
 import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock } from '../player/engine'
 import { clock, spoken } from '../player/format'
 import { WAVE_BUCKETS } from '../player/waveform'
-import { IconClose, IconForward, IconMoon, IconMuted, IconPause, IconPlay, IconRewind, IconVolume } from './icons'
+import { IconClose, IconForward, IconMoon, IconMuted, IconNext, IconPause, IconPlay, IconPrevious, IconRewind, IconVolume } from './icons'
 import { toolColor } from '../charts/palette'
 import '../styles/player.css'
 
@@ -67,7 +70,7 @@ function Menu({ label, value, children, align = 'left' }: {
 // ---- the player ---------------------------------------------------------------------------------------------
 
 export function AudioPlayer({ onClose }: { onClose?: () => void }) {
-  const { track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave } = usePlayer()
+  const { track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave, continues, notice } = usePlayer()
   const { time, duration, sleepLeft } = usePlayerClock()
   const act = usePlayerActions()
   const root = useRef<HTMLDivElement>(null)
@@ -146,6 +149,8 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
   const state = failed ? 'failed' : waiting && !playing ? 'loading' : playing ? 'playing' : 'paused'
   const level = muted ? 0 : volume
   const hoverTime = hover !== null ? hover * duration : null
+  // A chapter of a book has chapters either side; a file with no book has neither, and no buttons to go there.
+  const steps = Boolean(track.next || track.previous)
 
   return (
     <div
@@ -215,7 +220,7 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
             </button>
           </div>
 
-          <div className="player-controls">
+          <div className="player-controls" data-steps={steps || undefined}>
             <div className="pc-side">
               <Menu label="Playback speed" value={<>{rate}×</>}>
                 {(close) => RATES.map((r) => (
@@ -225,6 +230,17 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
             </div>
 
             <div className="pc-main">
+              {steps && (
+                <button
+                  className="pskip pstep"
+                  aria-label={track.previous ? `Previous chapter: ${track.previous.title}` : 'Previous chapter'}
+                  title={track.previous ? `Previous chapter: ${track.previous.title}` : 'This is the first chapter'}
+                  disabled={!track.previous}
+                  onClick={act.playPrevious}
+                >
+                  <IconPrevious size={22} strokeWidth={1.8} aria-hidden />
+                </button>
+              )}
               <button className="pskip" aria-label={`Back ${BACK} seconds`} title={`Back ${BACK} seconds`} onClick={() => act.skip(-BACK)}>
                 <IconRewind size={30} strokeWidth={1.6} aria-hidden /><b>{BACK}</b>
               </button>
@@ -237,6 +253,17 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
               <button className="pskip" aria-label={`Forward ${FORWARD} seconds`} title={`Forward ${FORWARD} seconds`} onClick={() => act.skip(FORWARD)}>
                 <IconForward size={30} strokeWidth={1.6} aria-hidden /><b>{FORWARD}</b>
               </button>
+              {steps && (
+                <button
+                  className="pskip pstep"
+                  aria-label={track.next ? `Next chapter: ${track.next.title}` : 'Next chapter'}
+                  title={track.next ? `Next chapter: ${track.next.title}` : 'This is the last chapter'}
+                  disabled={!track.next}
+                  onClick={act.playNext}
+                >
+                  <IconNext size={22} strokeWidth={1.8} aria-hidden />
+                </button>
+              )}
             </div>
 
             <div className="pc-side pc-right">
@@ -274,6 +301,19 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
           </div>
         </>
       )}
+
+      {(track.next || track.previous) && (
+        <div className="player-next">
+          <span className="player-next-text">
+            {track.next ? <><span className="player-next-label">Up next</span> <b>{track.next.title}</b></> : <span className="player-next-label">The last chapter</span>}
+          </span>
+          <label className="pswitch">
+            <input type="checkbox" role="switch" checked={continues} onChange={(e) => act.setContinues(e.target.checked)} />
+            <span>Play the next chapter</span>
+          </label>
+        </div>
+      )}
+      {notice && <p className="player-notice" role="status">{notice}</p>}
     </div>
   )
 }

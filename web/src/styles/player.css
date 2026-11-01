@@ -14,6 +14,7 @@
 /* ---- the full player ------------------------------------------------------------------------- */
 
 .player {
+  container: player / inline-size;   /* its controls fit the player's width, not the window's (see the end) */
   display: grid;
   gap: 8px;
   margin-top: 12px;
@@ -171,6 +172,98 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
 .pchip:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); border-color: var(--ink-3); }
 .pchip[aria-expanded='true'] { color: var(--ink); background: var(--pa-soft); border-color: var(--pa-ink); }
 
+/* ---- what plays next: the chapter after this one, and whether it starts by itself ---- */
+
+.player-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 14px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+.player-next-text { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.player-next-label { margin-right: 4px; color: var(--ink-2); font-size: var(--fs-xs); font-weight: 650; letter-spacing: 0.04em; }
+.pswitch { display: inline-flex; align-items: center; gap: 10px; min-height: 36px; color: var(--ink-2); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.pswitch input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  background: var(--ink-3);        /* off: still 3:1 or better against the player, as a control must be */
+  border: 0;
+  border-radius: var(--r-pill);
+  box-shadow: none;
+  transition: background-color var(--dur-2) var(--ease);
+}
+.pswitch input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: var(--surface);
+  border-radius: 50%;
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-2) var(--ease);
+}
+.pswitch input[type='checkbox']:checked { background: var(--pa-ink); }
+.pswitch input[type='checkbox']:checked::after { transform: translateX(16px); }
+.player-notice { font-size: var(--fs-sm); color: var(--ink-2); }
+
+/* A player in a narrow column of a wide window had no room: beside the Render card (about 400px) the sleep
+   button slid over Forward 30, and in the side column (170-320px, a file from an earlier reading) every control
+   sat on another. So the controls follow the player's own width: the volume slider goes first (the computer's
+   own volume is still there), then the mute button, with speed and sleep moving under the three big buttons;
+   at the narrowest those shrink a little. */
+@container player (max-width: 600px) { .pvolume { display: none; } }
+@container player (max-width: 400px) { .pc-volume { display: none; } }
+@container player (max-width: 330px) {
+  .player-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'main main' 'speed sleep'; row-gap: 6px; }
+  .pc-main { grid-area: main; justify-content: center; }
+  .pc-side:not(.pc-right) { grid-area: speed; }
+  .pc-right { grid-area: sleep; }
+}
+@container player (max-width: 220px) {
+  .pc-main { gap: 2px; }
+  .pskip { width: 40px; min-height: 40px; }
+  .pplay { width: 52px; height: 52px; }
+}
+
+/* A chapter of a book also has the previous and next buttons, either side of the three big ones. That makes the
+   middle 92px wider, so every step above moves up by that much for it (330, 400 and 600 become 422, 492 and 692),
+   and below 290px the buttons shrink a step earlier. */
+.pskip.pstep { width: 44px; min-height: 44px; }
+.player-controls[data-steps] .pc-main { gap: 6px; }
+@container player (max-width: 692px) { .player-controls[data-steps] .pvolume { display: none; } }
+@container player (max-width: 492px) { .player-controls[data-steps] .pc-volume { display: none; } }
+@container player (max-width: 422px) {
+  .player-controls[data-steps] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'main main' 'speed sleep'; row-gap: 6px; }
+  .player-controls[data-steps] .pc-main { grid-area: main; justify-content: center; }
+  .player-controls[data-steps] .pc-side:not(.pc-right) { grid-area: speed; }
+  .player-controls[data-steps] .pc-right { grid-area: sleep; }
+}
+@container player (max-width: 290px) {
+  .player-controls[data-steps] .pc-main { gap: 2px; }
+  .player-controls[data-steps] .pskip { width: 40px; min-height: 40px; }
+  .player-controls[data-steps] .pskip.pstep { width: 36px; }
+  .player-controls[data-steps] .pplay { width: 52px; height: 52px; }
+}
+@container player (max-width: 220px) {
+  .player-controls[data-steps] .pc-main { gap: 0; }
+  .player-controls[data-steps] .pskip { width: 36px; min-height: 36px; }
+  .player-controls[data-steps] .pskip.pstep { width: 32px; }
+  .player-controls[data-steps] .pplay { width: 48px; height: 48px; }
+}
+
 .pmenu { position: relative; }
 .pmenu-list {
   position: absolute;
@@ -291,6 +384,7 @@ button.mini-info:hover .mini-text b { text-decoration: underline; text-underline
   .player { padding: 12px 12px 10px; border-radius: 18px; }
   .pc-volume { display: none; }                 /* a phone has its own volume buttons */
   .pchip { min-height: 44px; }
+  .pswitch { min-height: 44px; }
   .pskip { width: 52px; min-height: 52px; }
   .pmenu-list button { min-height: 44px; }
   .mini { left: 10px; right: 10px; bottom: calc(var(--tab-h) + env(safe-area-inset-bottom, 0px) + 8px); padding: 6px 4px 6px 8px; border-radius: 18px; }

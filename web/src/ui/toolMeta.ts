@@ -3,7 +3,7 @@
 
 import type { ComponentType } from 'react'
 import type { ToolName } from '../charts/palette'
-import { IconAudiobooks, IconChat, IconDocuments, IconMail, IconMeetings } from './icons'
+import { IconApplications, IconAudiobooks, IconChat, IconDocuments, IconMail, IconMeetings, IconWeb } from './icons'
 import type { Section } from './sections'
 
 type Icon = ComponentType<{ size?: number; strokeWidth?: number; 'aria-hidden'?: boolean }>
@@ -14,9 +14,12 @@ export const TOOL_ICON: Record<ToolName, Icon> = {
   'mail-ai': IconMail,
   assistant: IconChat,
   audiobook: IconAudiobooks,
+  'apply-ai': IconApplications,
+  'web-ai': IconWeb,
 }
 
-export const TOOL_SECTION: Record<ToolName, Section> = {
+/** The page a tool has, where it has one: apply-ai and web-ai work through Chat and have none. */
+export const TOOL_SECTION: Partial<Record<ToolName, Section>> = {
   'meet-ai': 'meetings',
   'docu-ai': 'documents',
   'mail-ai': 'mail',

@@ -170,13 +170,17 @@ function ToolRows({ rows, days, go, levels }: {
     <div className="card toolrows">
       {TOOLS.map((tool) => {
         const mine = rows.filter((r) => toolOf(r.tool) === tool)
+        const section = SECTIONS.find((s) => s.id === TOOL_SECTION[tool])
+        // A tool with no page of its own (Applications, Web) is listed only when it did something in this period: its
+        // health is on Settings, and a row that leads nowhere and says "not used" is noise.
+        if (!section && mine.length === 0) return null
         const daily = days.map((d) => mine.filter((r) => dayKey(new Date(r.at)) === dayKey(d)).length)
         const last = mine.length ? mine.reduce((a, b) => (new Date(a.at) > new Date(b.at) ? a : b)) : null
         const level = levels[tool]
         const Icon = TOOL_ICON[tool]
-        const section = SECTIONS.find((s) => s.id === TOOL_SECTION[tool])!
+        const Row = section ? 'button' : 'div'
         return (
-          <button key={tool} className="toolrow" style={{ '--tile': toolColor(tool) } as CSSProperties} onClick={() => go(section.id)}>
+          <Row key={tool} className="toolrow" style={{ '--tile': toolColor(tool) } as CSSProperties} onClick={section ? () => go(section.id) : undefined}>
             <span className="navtile"><Icon size={18} strokeWidth={2} aria-hidden /></span>
             <span className="toolrow-name">
               <b>{displayTool(tool)}</b>
@@ -185,8 +189,8 @@ function ToolRows({ rows, days, go, levels }: {
             {level ? <span className={`badge toolrow-status ${level === 'ok' ? 'ok' : level === 'warning' ? 'warn' : 'bad'}`}>{level === 'ok' ? 'Healthy' : level === 'warning' ? 'Check' : 'Needs a login'}</span> : <span className="toolrow-status" />}
             <span className="toolrow-count"><b>{mine.length}</b> <span className="muted small">action{mine.length === 1 ? '' : 's'}</span></span>
             <span className="toolrow-spark"><Sparkline values={daily} color={toolColor(tool)} width={110} height={32} label={`${displayTool(tool)} actions per day`} /></span>
-            <IconChevron size={16} aria-hidden className="toolrow-go" />
-          </button>
+            {section ? <IconChevron size={16} aria-hidden className="toolrow-go" /> : <span aria-hidden />}
+          </Row>
         )
       })}
     </div>

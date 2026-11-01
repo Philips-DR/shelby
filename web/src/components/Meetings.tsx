@@ -18,6 +18,7 @@ import { CardHead } from '../ui/CardHead'
 import { ConfirmDelete, sizeOf } from '../ui/ConfirmDelete'
 import { DropZone } from '../ui/DropZone'
 import { Empty } from '../ui/Empty'
+import { useLayer } from '../ui/useLayer'
 import {
   IconActivity, IconAlert, IconCheck, IconChevron, IconDocuments, IconFail, IconMeetings, IconOk,
   IconRefresh, IconSearch, IconSpark, IconStop, IconTrash, IconUpload,
@@ -378,11 +379,11 @@ function Transcriber({ job, status, recordings, uploads, audio, setAudio, onWrit
   const [removeError, setRemoveError] = useState('')
   const running = job?.state === 'running'
 
-  const remove = async (name: string, path: string) => {
+  const remove = async (id: string, path: string) => {
     setRemoving(true)
     setRemoveError('')
     try {
-      await deleteUpload('audio', name)
+      await deleteUpload(id)
       if (audio.trim() === path) setAudio('')
       setAsking(false)
       await uploads.reload()
@@ -599,7 +600,7 @@ function Transcriber({ job, status, recordings, uploads, audio, setAudio, onWrit
             verb="Delete"
             busy={removing}
             error={removeError}
-            onConfirm={() => void remove(picked.name, picked.path)}
+            onConfirm={() => void remove(picked.id, picked.path)}
             onCancel={() => setAsking(false)}
           />
         )}
@@ -1080,6 +1081,12 @@ export function Meetings() {
 
   // Side by side, the newest meeting opens by itself rather than leaving half the page empty; on a phone the list comes first.
   const wide = useWide()
+  // Where the list is hidden behind a meeting or the "new" screen, that is a layer over it: Back goes to the list
+  // (useLayer.ts). Side by side there is nothing to go back from, and the newest meeting opens by itself (below).
+  useLayer('meetings', !wide && view !== 'list' ? { view, selected } : null, (to) => {
+    setView(to?.view ?? 'list')
+    setSelected(to?.selected ?? '')
+  })
   const newest = reversed[0]?.markdown ?? ''
   useEffect(() => {
     if (wide && view === 'list' && !selected && newest) selectMeeting(newest)

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clock, spoken } from './format'
+import { adjacent, continuesFrom } from './queue'
 import { numeric, store } from './storage'
 import { peaksOf } from './waveform'
 
@@ -85,5 +86,38 @@ describe('what the player remembers', () => {
     expect(() => store.write('x', '1')).not.toThrow()
     expect(() => store.write('x', null)).not.toThrow()
     expect(numeric('x', 7)).toBe(7)
+  })
+})
+
+describe('adjacent', () => {
+  const ch = (number: number, rendered = true) => ({ number, label: `Chapter ${number}`, audio: rendered ? [{ path: `/a/${number}.mp3` }] : [] })
+
+  it('goes to the next and the previous chapter that has audio, passing over any that has none', () => {
+    // a book whose foreword (2) and introduction (3) were never rendered
+    const book = [ch(1), ch(2, false), ch(3, false), ch(4), ch(5)]
+    expect(adjacent(book, 1, 1)?.number).toBe(4)
+    expect(adjacent(book, 4, -1)?.number).toBe(1)
+    expect(adjacent(book, 4, 1)?.number).toBe(5)
+  })
+
+  it('has nothing past either end, nor for a chapter it does not know', () => {
+    const book = [ch(1), ch(2), ch(3, false)]
+    expect(adjacent(book, 2, 1)).toBeNull() // the last one with audio
+    expect(adjacent(book, 1, -1)).toBeNull()
+    expect(adjacent(book, 9, 1)).toBeNull()
+  })
+
+  it('follows the chapter numbers, not the order the list arrived in', () => {
+    // chapter 1 arrives last: read in that order it would have nothing after it
+    expect(adjacent([ch(2), ch(3), ch(1)], 1, 1)?.number).toBe(2)
+    expect(adjacent([ch(2), ch(3), ch(1)], 3, -1)?.number).toBe(2)
+  })
+})
+
+describe('continuesFrom', () => {
+  it('plays on by default, and stops only when told to', () => {
+    expect(continuesFrom(null)).toBe(true)
+    expect(continuesFrom('1')).toBe(true)
+    expect(continuesFrom('0')).toBe(false)
   })
 })

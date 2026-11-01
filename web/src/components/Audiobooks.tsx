@@ -10,8 +10,11 @@
 // page is drawn from what the tool returned; nothing is estimated here except the selection's
 // speech and render time, which is the tool's own per-chapter figures added up (and says so).
 
-import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react'
-import { AUDIO_EXTS, deleteUpload, fetchMedia, getUploads, isAudio, uploadBook, uploadVoice, type Uploads } from '../api'
+import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import {
+  AUDIO_EXTS, deleteKept, deleteUpload, fetchMedia, fetchStored, getKept, getUploads, isAudio, uploadBook, uploadVoice,
+  type Kept, type Uploads,
+} from '../api'
 import { ChartCard } from '../charts/ChartCard'
 import { HBars } from '../charts/HBars'
 import { toolColor } from '../charts/palette'
@@ -19,8 +22,14 @@ import { Ring } from '../charts/Ring'
 import { useCountUp } from '../charts/useWidth'
 import { ask, call } from '../call'
 import { CardHead } from '../ui/CardHead'
-import { usePlayer, usePlayerActions } from '../player/engine'
+import { usePlayer, usePlayerActions, type Track } from '../player/engine'
+import { onRequest, takeRequest } from '../player/showing'
+import { adjacent } from '../player/queue'
+import { renderLabel, unrendered } from './audiobookText'
+import { audioKey, goesWithBook, withKept, withKeptBooks, withKeptSamples, type AudioEntry } from './audiobookKept'
 import { AudioPlayer } from '../ui/AudioPlayer'
+import { useLayer } from '../ui/useLayer'
+import { useAppState } from '../state'
 import { ConfirmDelete, sizeOf } from '../ui/ConfirmDelete'
 import { DropZone } from '../ui/DropZone'
 import {
@@ -61,11 +70,13 @@ interface BookJob {
   title?: string | null
 }
 
-interface AudioEntry { name: string; path: string; megabytes: number; modified: number; speed?: number }
+const fetchAudio = (a: AudioEntry) => (a.id ? fetchStored(a.id) : fetchMedia(a.path ?? ''))
 
 interface Chapter {
   number: number
   label: string
+  /** How this chapter's audio is named before its speed (the tool's names.chapter_stem): what kept audio is matched by. */
+  stem?: string
   appendix: boolean
   words: number
   speech: string
@@ -104,6 +115,9 @@ interface AudioBook {
 }
 
 const VOICES_OPEN = 'ab-voices-open'
+
+/** A chapter to bring into view; a new object each time, so asking twice for the same chapter scrolls twice. */
+interface Reveal { chapter: number }
 
 const KIND_LABEL: Record<BookJob['kind'], string> = {
   analyse: 'Reading the book',
@@ -206,9 +220,26 @@ function Fig({ label, count, suffix, children, foot, index }: {
 
 // ---------------------------------------------------------------------------
 
+/** A chapter's newest file, as a track that knows the chapters with audio either side of it, so the player
+ *  can go on to the next by itself (player/queue.ts). Each neighbour is fetched only when it is wanted. */
+function chapterTrack(pdf: string, chapters: readonly Chapter[], chapter: Chapter, book: string, blob: Blob): Track {
+  const near = (step: 1 | -1) => {
+    const other = adjacent(chapters, chapter.number, step)
+    return other && {
+      title: other.label,
+      load: async () => chapterTrack(pdf, chapters, other, book, await fetchAudio(other.audio![0]!)),
+    }
+  }
+  return {
+    key: audioKey(chapter.audio![0]!), title: `${chapter.label} · ${book}`, blob,
+    home: { book: pdf, chapter: chapter.number },
+    next: near(1) ?? undefined, previous: near(-1) ?? undefined,
+  }
+}
+
 /** Play a file a tool made. Fetched with the token and handed to the one player that lives above the pages
  *  (player/engine.tsx), so what you start here keeps playing when you leave this page. */
-function usePlay(path: string, title: string) {
+function usePlay(audio: AudioEntry | undefined, title: string, asTrack?: (blob: Blob) => Track) {
   const { track, playing: audible } = usePlayer()
   const { open, close } = usePlayerActions()
   const [busy, setBusy] = useState(false)
@@ -216,14 +247,16 @@ function usePlay(path: string, title: string) {
   const here = useRef(true)
   useEffect(() => { here.current = true; return () => { here.current = false } }, [])
 
-  const current = track?.key === path
+  const key = audio ? audioKey(audio) : ''
+  const current = !!key && track?.key === key
   const play = async () => {
+    if (!audio) return
     setBusy(true)
     setError('')
     try {
-      const blob = await fetchMedia(path)
+      const blob = await fetchAudio(audio)
       // Left the page while it downloaded: nothing should start talking from somewhere you are not looking.
-      if (here.current) open({ key: path, title, blob })
+      if (here.current) open(asTrack ? asTrack(blob) : { key, title, blob })
     } catch (e) {
       if (here.current) setError(message(e))
     } finally {
@@ -233,18 +266,19 @@ function usePlay(path: string, title: string) {
   return { current, playing: current && audible, busy, error, play, close }
 }
 
-/** Play or download a file a tool made. */
-function AudioFile({ path, size, label }: { path: string; size?: number; label?: string }) {
-  const { current, playing, busy, error: playError, play, close } = usePlay(path, label ?? fileName(path))
+/** Play or download a file a tool made, kept or still at its bench. */
+function AudioFile({ audio, label }: { audio: AudioEntry; label?: string }) {
+  const { current, playing, busy, error: playError, play, close } = usePlay(audio, label ?? audio.name)
   const [error, setError] = useState('')
+  const size = audio.megabytes || null
 
   const download = async () => {
     setError('')
     try {
-      const href = URL.createObjectURL(await fetchMedia(path))
+      const href = URL.createObjectURL(await fetchAudio(audio))
       const link = document.createElement('a')
       link.href = href
-      link.download = fileName(path)
+      link.download = audio.name
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(href), 10_000)
     } catch (e) {
@@ -252,7 +286,7 @@ function AudioFile({ path, size, label }: { path: string; size?: number; label?:
     }
   }
 
-  const kind = (fileName(path).split('.').pop() ?? '').toUpperCase()
+  const kind = (audio.name.split('.').pop() ?? '').toUpperCase()
   return (
     <div className={`ab-file ${current ? 'loaded' : ''} ${playing ? 'playing' : ''}`}>
       <div className="ab-file-row">
@@ -260,7 +294,7 @@ function AudioFile({ path, size, label }: { path: string; size?: number; label?:
           {playing ? <span className="ab-eq"><i /><i /><i /></span> : <IconAudiobooks size={17} strokeWidth={2} />}
         </span>
         <span className="ab-file-name">
-          <span className="ab-file-title">{label ?? fileName(path)}</span>
+          <span className="ab-file-title">{label ?? audio.name}</span>
           <span className="muted small">
             {playing && <b className="ab-now">Playing · </b>}
             {size != null && `${size} MB`}{size != null && kind && ' · '}{kind}
@@ -287,10 +321,12 @@ function AudioFile({ path, size, label }: { path: string; size?: number; label?:
 /** The book a job works on, as a person names it. */
 const jobName = (job: BookJob) => job.title || fileName(job.target)
 
-function JobCard({ job, name, reload, openBook }: {
+function JobCard({ job, name, samples, reload, openBook }: {
   job: BookJob | null
   /** The book's title as the library knows it, for a job from before jobs carried one. */
   name?: string
+  /** The voice samples there are: a finished sample job's file, once the suite has taken it, is played from there. */
+  samples: AudioEntry[]
   reload: () => Promise<void>
   /** Open the job's book; absent while that book is the one open. */
   openBook?: () => void
@@ -373,7 +409,9 @@ function JobCard({ job, name, reload, openBook }: {
           )}
         </>
       )}
-      {job.state === 'done' && job.kind === 'sample' && job.outputs.map((o) => <AudioFile key={o} path={o} />)}
+      {job.state === 'done' && job.kind === 'sample' && job.outputs.map((o) => (
+        <AudioFile key={o} audio={samples.find((s) => s.name === fileName(o)) ?? { name: fileName(o), path: o, megabytes: 0, modified: 0 }} />
+      ))}
       {job.state === 'done' && (job.kind === 'render' || job.kind === 'analyse') && (
         <p className="ab-done muted">
           {job.kind === 'render'
@@ -398,12 +436,13 @@ interface UploadsPoll { data: Uploads | null; error: string; reload: () => Promi
  *  output folder is (the folder is named for the PDF). */
 interface Shelf {
   stem: string
-  upload: { name: string; path: string; bytes: number } | null
+  upload: { id: string; name: string; path: string; bytes: number } | null
   audio: AudioBook | null
 }
 
-/** A book to delete, as the library names it. */
-interface Doomed { stem: string; title: string; upload: { name: string; bytes: number } | null; audio: number }
+/** A book to delete, as the library names it: its upload, how many audio files it has, and which of them the suite
+ *  keeps (by record id). */
+interface Doomed { stem: string; title: string; upload: { id: string; name: string; bytes: number } | null; audio: number; kept: string[] }
 
 /** Delete one book: its uploaded PDF, its finished audio, or both. What goes is read first with the tool that
  * only reads, so the question names it; the delete tool is called only on a confirmed press, never to find out
@@ -414,7 +453,10 @@ function DeleteBook({ book, onCancel, onChanged, onDone }: {
   onChanged: () => void
   onDone: () => void
 }) {
+  // What the tool's own folder still holds for the book (working files, and audio not yet handed over), or null
+  // while asking. Once the suite keeps a book's audio the folder is often gone, and then there is nothing to show.
   const [summary, setSummary] = useState<string | null>(null)
+  const [folder, setFolder] = useState(false)
   const [keepAudio, setKeepAudio] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -422,8 +464,8 @@ function DeleteBook({ book, onCancel, onChanged, onDone }: {
 
   useEffect(() => {
     let live = true
-    call<{ summary: string }>('audiobook__describe_audiobook', { book: book.stem }).then(
-      (r) => { if (live) setSummary(r.summary) },
+    call<{ summary: string; exists: boolean; running?: string | null }>('audiobook__describe_audiobook', { book: book.stem }).then(
+      (r) => { if (live) { setSummary(r.summary); setFolder(r.exists || !!r.running) } },
       (e) => { if (live) setError(message(e)) },
     )
     return () => { live = false }
@@ -432,10 +474,13 @@ function DeleteBook({ book, onCancel, onChanged, onDone }: {
   const confirm = async () => {
     setBusy(true)
     setError('')
-    // Kept audio keeps its folder; otherwise the folder goes, with the working files a reading leaves in it.
+    // Kept audio keeps its folder; otherwise the audio goes -- the tool's folder, with the working files a reading
+    // leaves in it, and what the suite keeps.
     if (!(book.upload && keepAudio && book.audio > 0)) {
       try {
+        // The tool first: it refuses while the book is being read or rendered, and then nothing may go.
         await ask('audiobook__delete_audiobook', { book: book.stem }, true)
+        if (book.kept.length > 0) await deleteKept(book.kept)
       } catch (e) {
         setError(message(e))
         setBusy(false)
@@ -446,7 +491,7 @@ function DeleteBook({ book, onCancel, onChanged, onDone }: {
     }
     if (book.upload) {
       try {
-        await deleteUpload('book', book.upload.name)
+        await deleteUpload(book.upload.id)
       } catch (e) {
         setError(audioGoes ? `The audio is deleted, but the PDF could not be: ${message(e)}` : `The PDF could not be deleted: ${message(e)}`)
         setBusy(false)
@@ -481,7 +526,7 @@ function DeleteBook({ book, onCancel, onChanged, onDone }: {
           Keep its audio, and delete only the PDF
         </label>
       )}
-      {summary !== null && audioGoes && <pre className="confirm-preview">{summary}</pre>}
+      {summary !== null && audioGoes && folder && <pre className="confirm-preview">{summary}</pre>}
     </ConfirmDelete>
   )
 }
@@ -494,7 +539,8 @@ function ShelfRow({ shelf, index, overview, running, onOpen, onDelete }: {
   overview: Overview | undefined
   running: BookJob | null
   onOpen: (path: string) => void
-  onDelete: (book: Doomed) => void
+  /** Ask to delete a book, by its folder's name; the page knows its upload and its audio. */
+  onDelete: (stem: string, title: string) => void
 }) {
   const [listening, setListening] = useState(false)
   const title = overview?.title ?? shelf.audio?.title ?? shelf.stem
@@ -530,14 +576,14 @@ function ShelfRow({ shelf, index, overview, running, onOpen, onDelete }: {
                 <IconPlay size={16} aria-hidden />{listening ? 'Hide' : 'Listen'}
               </button>
             )}
-          <button className="ghost icon" aria-label={`Delete ${title}`} title="Delete…" onClick={() => onDelete({ stem: shelf.stem, title, upload: shelf.upload, audio: files.length })}>
+          <button className="ghost icon" aria-label={`Delete ${title}`} title="Delete…" onClick={() => onDelete(shelf.stem, title)}>
             <IconTrash size={16} aria-hidden />
           </button>
         </span>
       </div>
       {listening && (
         <div className="ab-files ab-shelf-files">
-          {files.map((f) => <AudioFile key={`${f.path}:${f.modified}`} path={f.path} size={f.megabytes} />)}
+          {files.map((f) => <AudioFile key={`${audioKey(f)}:${f.modified}`} audio={f} />)}
         </div>
       )}
     </li>
@@ -551,7 +597,8 @@ function Library({ shelves, overviews, job, uploads, onOpen, onDelete }: {
   job: BookJob | null
   uploads: UploadsPoll
   onOpen: (path: string, readNow?: boolean) => void
-  onDelete: (book: Doomed) => void
+  /** Ask to delete a book, by its folder's name; the page knows its upload and its audio. */
+  onDelete: (stem: string, title: string) => void
 }) {
   const [typed, setTyped] = useState('')
   const [uploading, setUploading] = useState<{ name: string; fraction: number } | null>(null)
@@ -721,11 +768,13 @@ function Reader({ pdf, chapter, onClose }: { pdf: string; chapter: Chapter; onCl
 
 /** One chapter: tick it to render it, play it once it is rendered, read what will be spoken. Its text and its
  *  player open under it: below the whole list, a phone showed nothing where the button was pressed. */
-function ChapterRow({ pdf, version, chapter, chosen, longest, book, reading, onToggle, onRead }: {
+function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, reading, onToggle, onRead }: {
   pdf: string
   /** Bumped when corrections are saved, so open text is read again with them applied. */
   version: number
   chapter: Chapter
+  /** The whole book's chapters, so the player knows which comes next. */
+  chapters: readonly Chapter[]
   chosen: boolean
   longest: number
   book: string
@@ -735,10 +784,11 @@ function ChapterRow({ pdf, version, chapter, chosen, longest, book, reading, onT
 }) {
   // The newest file of this chapter, whatever its speed.
   const audio = chapter.audio?.[0]
-  const { current, playing, busy, error, play, close } = usePlay(audio?.path ?? '', `${chapter.label} · ${book}`)
+  const { current, playing, busy, error, play, close } = usePlay(audio, `${chapter.label} · ${book}`,
+    (blob) => chapterTrack(pdf, chapters, chapter, book, blob))
   const width = longest > 0 ? Math.max(2, (chapter.words / longest) * 100) : 0
   return (
-    <li className={`ab-ch ${chosen ? '' : 'off'} ${current ? 'loaded' : ''}`}>
+    <li id={`ab-ch-${chapter.number}`} className={`ab-ch ${chosen ? '' : 'off'} ${current ? 'loaded' : ''}`}>
       <div className="ab-ch-row">
         <label className="ab-ch-pick">
           <input type="checkbox" checked={chosen} onChange={onToggle} />
@@ -770,10 +820,14 @@ function ChapterRow({ pdf, version, chapter, chosen, longest, book, reading, onT
   )
 }
 
-function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onBack, onDelete }: {
+function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, reloadJob, onBack, onDelete }: {
   pdf: string
+  /** What the suite keeps of this tool's work: the chapters' audio once a render has handed it over. */
+  kept: Kept[]
   /** Just uploaded: start reading it as soon as it is open, if nothing else is running. */
   readNow: boolean
+  /** The docked player asked to be shown where it is playing: bring that chapter into view once the chapters are drawn. */
+  reveal: Reveal | null
   voices: Voice[]
   /** The voice samples made so far, for the Voices card under the chapters. */
   samples: AudioEntry[]
@@ -796,9 +850,19 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
   const [m4b, setM4b] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Folded to a line until asked for, and folded again by itself once a render has started: the job's own card
+  // shows the progress, and the card is only needed to choose a voice and a speed.
+  const [renderShown, setRenderShown] = useState(false)
 
   const running = job?.state === 'running'
-  const data = overview.data
+  const data = useMemo(() => (overview.data ? withKept(overview.data, kept) : null), [overview.data, kept])
+
+  const revealed = useRef<Reveal | null>(null)
+  useEffect(() => {
+    if (!reveal || reveal === revealed.current || !data?.analysed) return
+    revealed.current = reveal
+    document.getElementById(`ab-ch-${reveal.chapter}`)?.scrollIntoView({ block: 'center' })
+  }, [reveal, data?.analysed])
 
   // A job names the path as the tool resolved it, which is not always what was typed (~, a relative
   // path, a link): compare against the tool's own spelling. And only a read this page saw running
@@ -817,7 +881,7 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
   const made = job && job.kind === 'render' && job.target === mine ? `${job.id}:${job.outputs.length}:${job.state}` : ''
   useEffect(() => { if (made) void overview.reload() }, [made])
 
-  const start = async (tool: string, args: Record<string, unknown>) => {
+  const start = async (tool: string, args: Record<string, unknown>): Promise<boolean> => {
     setBusy(true)
     setError('')
     try {
@@ -825,8 +889,10 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
       await reloadJob()
       // A cached book can be read before the first poll sees it running.
       if (started.kind === 'analyse' && started.state !== 'running') await overview.reload()
+      return true
     } catch (e) {
       setError(message(e))
+      return false
     } finally {
       setBusy(false)
     }
@@ -841,7 +907,8 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
   }, [data?.analysed, running])
 
   const chapters = data?.chapters ?? []
-  const chosen = picked ?? new Set(chapters.map((c) => c.number))
+  // Until you tick something, the chapters still to render: a finished chapter is not offered again by itself.
+  const chosen = picked ?? unrendered(chapters)
   const cloned = voices.filter((v) => v.kind === 'cloned')
   const voiceName = voice || cloned[0]?.name || voices[0]?.name || ''
 
@@ -853,12 +920,17 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
   }
 
   const everything = chosen.size === chapters.length
-  const render = () => start('audiobook__start_render', {
-    pdf, voice: voiceName, speed, m4b,
-    ...(everything ? {} : { chapters: toSelection([...chosen].sort((a, b) => a - b)) }),
-  })
+  const render = async () => {
+    const started = await start('audiobook__start_render', {
+      pdf, voice: voiceName, speed, m4b,
+      ...(everything ? {} : { chapters: toSelection([...chosen].sort((a, b) => a - b)) }),
+    })
+    if (started) setRenderShown(false)
+  }
   const canRender = !(busy || running || chosen.size === 0 || !voiceName)
-  const renderLabel = `Render ${everything ? 'all chapters' : `${chosen.size} chapter${chosen.size === 1 ? '' : 's'}`}`
+  const rendered = chapters.filter((c) => c.audio?.length).length
+  const finished = rendered === chapters.length && chapters.length > 0
+  const buttonLabel = renderLabel(chosen.size, chapters.length, rendered)
 
   const picks = data?.analysed ? chapters.filter((c) => chosen.has(c.number)) : []
   const words = picks.reduce((n, c) => n + c.words, 0)
@@ -867,7 +939,6 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
   const times = data?.analysed ? selectionTimes(data, chosen) : null
   const skipped = Object.entries(data?.skipped ?? {})
   const left = skipped.reduce((n, [, count]) => n + count, 0)
-  const rendered = chapters.filter((c) => c.audio?.length).length
   const others = data?.other_audio ?? []
   const whole = others.filter((f) => f.name.endsWith('.m4b'))
   const older = others.filter((f) => !f.name.endsWith('.m4b'))
@@ -938,47 +1009,60 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
             <Fig index={3} label="To render" foot="estimated, on this computer"><Duration text={times.render} /></Fig>
           </div>
 
-          <div className="grid-split ab-bookgrid">
-            <div className="ab-main">
-              <div className="card ab-chapters">
-                <CardHead
-                  icon={IconAudiobooks}
-                  tool="audiobook"
-                  title="Chapters"
-                  sub={rendered ? `Tick the chapters to render. ${rendered} of ${chapters.length} rendered: play one here.` : 'Tick the chapters to render. Bars are words; times are speech.'}
-                >
-                  <button className="ghost" onClick={() => setPicked(everything ? new Set() : new Set(chapters.map((c) => c.number)))}>{everything ? 'Clear all' : 'Select all'}</button>
-                </CardHead>
-                <ul className="ab-chlist">
-                  {chapters.map((c) => (
-                    <ChapterRow
-                      key={c.number}
-                      pdf={pdf}
-                      version={version}
-                      chapter={c}
-                      chosen={chosen.has(c.number)}
-                      longest={longest}
-                      book={title}
-                      reading={reading === c.number}
-                      onToggle={() => toggle(c.number)}
-                      onRead={() => setReading(reading === c.number ? null : c.number)}
-                    />
-                  ))}
-                </ul>
-                <div className="ab-chart-foot">
-                  <p className="small muted" role="status">
-                    {chosen.size === 0
-                      ? 'No chapter chosen, so there is nothing to render.'
-                      : `${chosen.size} of ${chapters.length} chosen · ${words.toLocaleString()} words${times.speech ? ` · ${times.approx ? 'about ' : ''}${times.speech} of speech` : ''}`}
-                  </p>
-                </div>
+          <div className="ab-main">
+            <div className="card ab-chapters">
+              <CardHead
+                icon={IconAudiobooks}
+                tool="audiobook"
+                title="Chapters"
+                sub={finished
+                  ? 'Every chapter is rendered: play one here, or tick one to render it again.'
+                  : rendered
+                    ? `${rendered} of ${chapters.length} rendered: play one here. The rest are ticked to render.`
+                    : 'Tick the chapters to render. Bars are words; times are speech.'}
+              >
+                <button className="ghost" onClick={() => setPicked(everything ? new Set() : new Set(chapters.map((c) => c.number)))}>{everything ? 'Clear all' : 'Select all'}</button>
+              </CardHead>
+              <ul className="ab-chlist">
+                {chapters.map((c) => (
+                  <ChapterRow
+                    key={c.number}
+                    pdf={pdf}
+                    version={version}
+                    chapter={c}
+                    chapters={chapters}
+                    chosen={chosen.has(c.number)}
+                    longest={longest}
+                    book={title}
+                    reading={reading === c.number}
+                    onToggle={() => toggle(c.number)}
+                    onRead={() => setReading(reading === c.number ? null : c.number)}
+                  />
+                ))}
+              </ul>
+              <div className="ab-chart-foot">
+                <p className="small muted" role="status">
+                  {chosen.size === 0
+                    ? finished ? 'Every chapter has audio. Tick one to render it again.' : 'No chapter chosen, so there is nothing to render.'
+                    : `${chosen.size} of ${chapters.length} chosen · ${words.toLocaleString()} words${times.speech ? ` · ${times.approx ? 'about ' : ''}${times.speech} of speech` : ''}`}
+                </p>
               </div>
-
             </div>
 
-            <div className="ab-side">
-              <div className="card ab-render">
-                <CardHead icon={IconZap} tool="audiobook" title="Render" sub={`${everything ? 'The whole book' : `${chosen.size} of ${chapters.length} chapters`}${times.speech ? `, ${times.approx ? 'about ' : ''}${times.speech} of speech` : ''}${times.render ? `; about ${times.render} to render on this computer` : ''}`} />
+            <div className={`card ab-render ${renderShown ? '' : 'is-folded'}`}>
+              <CardHead
+                icon={IconZap}
+                tool="audiobook"
+                title="Render"
+                sub={renderShown
+                  ? `${everything ? 'The whole book' : `${chosen.size} of ${chapters.length} chapters`}${times.speech ? `, ${times.approx ? 'about ' : ''}${times.speech} of speech` : ''}${times.render ? `; about ${times.render} to render on this computer` : ''}`
+                  : `${buttonLabel} · ${voiceName || 'no voice'}, speed ${speed}${running ? ' · another job is running' : ''}`}
+              >
+                <button className="ghost ab-fold" aria-expanded={renderShown} aria-controls="ab-render-body" onClick={() => setRenderShown(!renderShown)}>
+                  {renderShown ? 'Hide' : 'Show'}<IconChevron size={16} aria-hidden className="ab-fold-icon" />
+                </button>
+              </CardHead>
+              <div id="ab-render-body" hidden={!renderShown}>
                 <div className="stack">
                   <label className="ab-field">
                     <span>Voice</span>
@@ -999,36 +1083,37 @@ function Book({ pdf, readNow, voices, samples, voicesLoaded, job, reloadJob, onB
                     Also one .m4b file
                   </label>
                   <button className="primary ab-render-go" disabled={!canRender} onClick={() => void render()}>
-                    <IconZap size={16} aria-hidden />{renderLabel}
+                    <IconZap size={16} aria-hidden />{buttonLabel}
                   </button>
                 </div>
                 <p className="hint">
                   Hours of work for a whole book, and nothing is lost if it stops: every sentence spoken is kept, so starting it again
                   carries on. A different speed re-encodes in seconds.{running && ' Another job is running — one at a time.'}
                 </p>
-                {error && <p className="error">{error}</p>}
               </div>
-
-              {others.length > 0 && (
-                <div className="card ab-listen">
-                  <CardHead icon={IconAudiobooks} tool="audiobook" title="Listen" sub="The book's other audio." />
-                  {whole.length > 0 && (
-                    <div className="ab-files">
-                      {whole.map((f) => <AudioFile key={`${f.path}:${f.modified}`} path={f.path} size={f.megabytes} label={`The whole book · ${f.name}`} />)}
-                    </div>
-                  )}
-                  {older.length > 0 && (
-                    <details className="ab-listen-more">
-                      <summary>From an earlier reading ({older.length} file{older.length === 1 ? '' : 's'})</summary>
-                      <p className="hint">Made when this book's chapters were found differently. Rendering it again makes files for the chapters above.</p>
-                      <div className="ab-files">
-                        {older.map((f) => <AudioFile key={`${f.path}:${f.modified}`} path={f.path} size={f.megabytes} />)}
-                      </div>
-                    </details>
-                  )}
-                </div>
-              )}
+              {/* Outside the fold: a refusal must show even while the card is folded (the phone's Render bar starts one too). */}
+              {error && <p className="error">{error}</p>}
             </div>
+
+            {others.length > 0 && (
+              <div className="card ab-listen">
+                <CardHead icon={IconAudiobooks} tool="audiobook" title="Listen" sub="The book's other audio." />
+                {whole.length > 0 && (
+                  <div className="ab-files">
+                    {whole.map((f) => <AudioFile key={`${audioKey(f)}:${f.modified}`} audio={f} label={`The whole book · ${f.name}`} />)}
+                  </div>
+                )}
+                {older.length > 0 && (
+                  <details className="ab-listen-more">
+                    <summary>From an earlier reading ({older.length} file{older.length === 1 ? '' : 's'})</summary>
+                    <p className="hint">Made when this book's chapters were found differently. Rendering it again makes files for the chapters above.</p>
+                    <div className="ab-files">
+                      {older.map((f) => <AudioFile key={`${audioKey(f)}:${f.modified}`} audio={f} />)}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Under the chapters, the width of the page: the voices are chosen for a book, so they live with it. */}
@@ -1184,7 +1269,7 @@ function Voices({ voices, samples, loaded, running, reloadJob }: {
           <details className="ab-presets">
             <summary>Samples ({samples.length})</summary>
             <div className="ab-files">
-              {samples.map((f) => <AudioFile key={`${f.path}:${f.modified}`} path={f.path} size={f.megabytes} />)}
+              {samples.map((f) => <AudioFile key={`${audioKey(f)}:${f.modified}`} audio={f} />)}
             </div>
           </details>
         )}
@@ -1272,31 +1357,47 @@ function useOverviews(paths: string[], refresh: string): Record<string, Overview
 }
 
 export function Audiobooks() {
-  // The book open, by its PDF's path; none is the library.
+  // The book open, by its PDF's path; none is the library. Back from a book goes to the library (useLayer.ts).
   const [book, setBook] = useState('')
+  useLayer('book', book || null, (to) => setBook(to ?? ''))
   const [readNow, setReadNow] = useState(false)
+  const [reveal, setReveal] = useState<Reveal | null>(null)
   const [deleting, setDeleting] = useState<Doomed | null>(null)
   const [changed, setChanged] = useState(0)
   const uploads = usePoll(getUploads, 30000)
   const status = usePoll(() => call<{ job: BookJob | null }>('audiobook__job_status'), 3000)
   const voiceList = usePoll(() => call<{ voices: Voice[] }>('audiobook__list_voices'), 30000)
+  // Finished audio is the suite's to keep (assistant/collect.py): the tool lists only what it has not yet handed over.
   const finished = usePoll(() => call<{ audiobooks: AudioBook[] }>('audiobook__list_audiobooks'), 30000)
+  const keptPoll = usePoll(() => getKept('audiobook'), 30000)
   const job = status.data?.job ?? null
 
-  // Chapters finish one by one during a render, so the audio follows the job.
+  // Chapters finish one by one during a render, so the audio follows the job; and the server says when it has taken
+  // something in, which is a moment after the tool made it.
+  const { events } = useAppState()
+  const taken = useMemo(() => events.filter((e) => e.type === 'records_changed' && e.tool === 'audiobook').at(-1)?.seq ?? 0, [events])
   const progressKey = job ? `${job.id}:${job.state}:${job.outputs.length}` : ''
-  useEffect(() => { void finished.reload() }, [progressKey, changed])
+  useEffect(() => { void finished.reload() }, [progressKey, changed, taken])
+  useEffect(() => { void keptPoll.reload() }, [progressKey, changed, taken])
   const justFinished = job?.state === 'done' ? job.id : ''
   useEffect(() => { if (justFinished) void voiceList.reload() }, [justFinished])
-  const overviews = useOverviews((uploads.data?.books ?? []).map((b) => b.path), `${justFinished}:${changed}`)
+  const kept = useMemo(() => keptPoll.data?.records ?? [], [keptPoll.data])
+  const read = useOverviews((uploads.data?.books ?? []).map((b) => b.path), `${justFinished}:${changed}`)
+  const overviews = useMemo(
+    () => Object.fromEntries(Object.entries(read).map(([path, o]) => [path, o && withKept(o, kept)])),
+    [read, kept],
+  )
 
   // A book is its upload and its audio, matched by name, as the output folder is named for the PDF.
-  const audiobooks = (finished.data?.audiobooks ?? []).filter((b) => b.book !== 'voices')
+  const audiobooks = useMemo(() => withKeptBooks(finished.data?.audiobooks ?? [], kept), [finished.data, kept])
   const shelves: Shelf[] = [
     ...(uploads.data?.books ?? []).map((u) => ({ stem: stem(u.name), upload: u, audio: audiobooks.find((b) => b.book === stem(u.name)) ?? null })),
     ...audiobooks.filter((b) => !uploads.data?.books.some((u) => stem(u.name) === b.book)).map((b) => ({ stem: b.book, upload: null, audio: b })),
   ]
-  const samples = finished.data?.audiobooks.find((b) => b.book === 'voices')?.files ?? []
+  const samples = useMemo(
+    () => withKeptSamples(finished.data?.audiobooks.find((b) => b.book === 'voices')?.files ?? [], kept),
+    [finished.data, kept],
+  )
 
   const open = (path: string, read = false) => {
     setBook(path)
@@ -1304,9 +1405,25 @@ export function Audiobooks() {
     window.scrollTo({ top: 0 })
   }
   const close = () => { setBook(''); window.scrollTo({ top: 0 }) }
+
+  // The docked player, tapped from anywhere: open the book it is playing and bring that chapter into view. A request
+  // made before this page existed is waiting; one made while it is open arrives at once.
+  const openLatest = useRef(open)
+  openLatest.current = open
+  useEffect(() => {
+    const answer = () => {
+      const request = takeRequest()
+      if (!request) return
+      openLatest.current(request.book)
+      setReveal({ chapter: request.chapter })
+    }
+    answer()
+    return onRequest(answer)
+  }, [])
   const doomedFor = (name: string, title: string): Doomed => {
     const shelf = shelves.find((s) => s.stem === name)
-    return { stem: name, title, upload: shelf?.upload ?? null, audio: shelf?.audio?.files.length ?? 0 }
+    const ids = kept.filter((r) => goesWithBook(r, name)).map((r) => r.id)
+    return { stem: name, title, upload: shelf?.upload ?? null, audio: shelf?.audio?.files.length ?? 0, kept: ids }
   }
   const titleFor = (path: string) => {
     const shelf = shelves.find((s) => s.stem === stem(path))
@@ -1318,14 +1435,16 @@ export function Audiobooks() {
 
   return (
     <div className="panel ab-page" style={style({ '--ab': toolColor('audiobook') })}>
-      <JobCard job={job} name={job ? titleFor(job.target) : undefined} reload={status.reload} openBook={jobBook ? () => open(jobBook) : undefined} />
+      <JobCard job={job} name={job ? titleFor(job.target) : undefined} samples={samples} reload={status.reload} openBook={jobBook ? () => open(jobBook) : undefined} />
       {book ? (
         <Book
           key={book}
           pdf={book}
           readNow={readNow}
+          reveal={reveal}
           voices={voiceList.data?.voices ?? []}
           samples={samples}
+          kept={kept}
           voicesLoaded={voiceList.data !== null}
           job={job}
           reloadJob={status.reload}
@@ -1333,7 +1452,7 @@ export function Audiobooks() {
           onDelete={(title) => setDeleting(doomedFor(stem(book), title))}
         />
       ) : (
-        <Library shelves={shelves} overviews={overviews} job={job} uploads={uploads} onOpen={open} onDelete={setDeleting} />
+        <Library shelves={shelves} overviews={overviews} job={job} uploads={uploads} onOpen={open} onDelete={(name, title) => setDeleting(doomedFor(name, title))} />
       )}
       {(status.error || voiceList.error || finished.error) && <p className="error">{status.error || voiceList.error || finished.error}</p>}
       {deleting !== null && (

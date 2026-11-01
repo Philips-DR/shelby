@@ -98,9 +98,7 @@
 
 .ab-unread { display: flex; align-items: flex-start; gap: 16px; }
 
-.ab-bookgrid { align-items: stretch; }
 .ab-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.ab-side { min-width: 0; }
 
 /* the chapters: a row each, ticked to render, with a bar for its length and a play button once rendered.
    A row is laid out by the width of its own list, not the window's: beside the sidebar and the Render column,
@@ -142,10 +140,8 @@
 .ab-ch .ab-reader { margin: 4px 0 12px; background: var(--surface-2); box-shadow: none; }
 .ab-reader .reader { margin: 0; }
 
-/* ---- render: its own column on a desktop, kept in view while the chapters scroll ------------- */
+/* ---- render and listen: cards under the chapters, in one column; render folded to a line until asked for ------------- */
 
-.ab-side { display: flex; flex-direction: column; gap: 16px; }
-@media (min-width: 1024px) { .ab-side { position: sticky; top: 20px; align-self: start; } }
 .ab-render { display: flex; flex-direction: column; }
 .ab-field { display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600; }
 .ab-field select { width: 100%; }
@@ -194,7 +190,8 @@
 /* ---- voices, and the rows of audio files ----------------------------------------- */
 
 /* voices: under a book's chapters, folded to one line until asked for */
-.ab-voices-card.is-folded .card-head { margin-bottom: 0; }
+.ab-voices-card.is-folded .card-head,
+.ab-render.is-folded .card-head { margin-bottom: 0; }
 .ab-fold { min-height: 40px; gap: 6px; }
 .ab-fold-icon { transition: transform var(--dur-2) var(--ease); transform: rotate(90deg); }
 .ab-fold[aria-expanded='true'] .ab-fold-icon { transform: rotate(-90deg); }
@@ -233,7 +230,7 @@
 .ab-clone { margin-top: 18px; }
 .ab-clone button { min-height: 44px; }
 
-.ab-files { display: flex; flex-direction: column; padding: 0 10px 6px; }
+.ab-files { container: files / inline-size; display: flex; flex-direction: column; padding: 0 10px 6px; }
 .ab-file { padding: 10px 4px; border-top: 1px solid var(--line); }
 .ab-file-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .ab-file-tile { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; color: var(--ink); background: var(--ab-tint); }
@@ -258,6 +255,15 @@
   .ab-file-tile { width: 32px; height: 32px; border-radius: 10px; }
   .ab-file-row { gap: 10px; }
   .ab-files { padding-inline: 6px; }
+}
+
+/* a file in a narrow column of a wide window (a book's side column, 170-330px): Play and Download beside the
+   name left it a letter a line and pushed the page wider than the window, so they take a row of their own */
+@media (min-width: 640px) {
+  @container files (max-width: 420px) {
+    .ab-file-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 8px; }
+    .ab-file-act { grid-column: 1 / -1; flex-wrap: wrap; }
+  }
 }
 
 .ab-delete { margin-top: 8px; align-self: flex-start; }

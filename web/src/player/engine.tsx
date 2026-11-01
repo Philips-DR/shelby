@@ -9,13 +9,18 @@
 // animation frame, so sixty updates a second re-render nothing.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { CONTINUE_KEY, PREFETCH_SECONDS, continuesFrom } from './queue'
 import { numeric, store } from './storage'
 import { useWaveform, type Wave } from './waveform'
 
 export const BACK = 15
 export const FORWARD = 30
 
-export interface Track { key: string; title: string; album?: string; blob: Blob }
+/** What plays after (or before) a track: its name, to show, and how to fetch it when it is wanted. */
+export interface Upcoming { title: string; load: () => Promise<Track> }
+/** Where a track is shown playing: a book (its PDF's path) and the chapter in it, so the docked player can take you there. */
+export interface Home { book: string; chapter: number }
+export interface Track { key: string; title: string; album?: string; blob: Blob; home?: Home; next?: Upcoming; previous?: Upcoming }
 type Loaded = Track & { url: string }
 export interface Sleep { minutes: number; endsAt: number }
 
@@ -32,6 +37,10 @@ interface PlayerState {
   wave: Wave
   /** How many full players are on screen; the docked one steps aside while there is one. */
   fullViews: number
+  /** Whether the next chapter starts by itself when one ends. */
+  continues: boolean
+  /** Why the next chapter did not start, when it could not be fetched. */
+  notice: string
 }
 interface PlayerClock { time: number; duration: number; sleepLeft: number }
 interface PlayerActions {
@@ -44,6 +53,10 @@ interface PlayerActions {
   setVolume(volume: number): void
   setMuted(muted: boolean): void
   setSleep(minutes: number | null): void
+  setContinues(on: boolean): void
+  /** Go to the track after or before this one, when there is one (the headphones' and lock screen's buttons). */
+  playNext(): void
+  playPrevious(): void
   startOver(): void
   dismissResume(): void
   /** A view is dragging the bar: leave it alone until it lets go. */
@@ -87,10 +100,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [sleep, setSleepState] = useState<Sleep | null>(null)
   const [sleepLeft, setSleepLeft] = useState(0)
   const [fullViews, setFullViews] = useState(0)
+  const [continues, setContinuesState] = useState(() => continuesFrom(store.read(CONTINUE_KEY)))
+  const [notice, setNotice] = useState('')
   const wave = useWaveform(track?.blob ?? null)
 
   const rateRef = useRef(rate)
   rateRef.current = rate
+  const continuesRef = useRef(continues)
+  continuesRef.current = continues
   const waveSeconds = useRef(0)
   waveSeconds.current = wave.seconds
   const dragging = useRef(false)
@@ -111,6 +128,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const t = trackRef.current
     if (el && t && el.currentTime > 5 && !el.ended) store.write(positionKey(t.key), String(Math.floor(el.currentTime)))
   }, [])
+
+  // ---- the next track: fetched a little before this one ends, then opened when it does
+  const upcoming = useRef<{ after: string; track: Promise<Track | null> } | null>(null)
+  const openRef = useRef<(track: Track) => void>(() => {})
+  const fetchNext = useCallback((t: Loaded) => {
+    if (!t.next) return null
+    if (upcoming.current?.after !== t.key) upcoming.current = { after: t.key, track: t.next.load().catch(() => null) }
+    return upcoming.current.track
+  }, [])
+  const advance = useCallback((t: Loaded, whenEnded: boolean) => {
+    const next = fetchNext(t)
+    if (!next) return
+    setWaiting(true)
+    void next.then((track) => {
+      // Something else was chosen meanwhile, or the ended chapter was played again: leave it be.
+      if (trackRef.current !== t || (whenEnded && !audio.current?.ended)) return
+      if (track) openRef.current(track)
+      else { setWaiting(false); setNotice(`Could not fetch ${t.next!.title}. Press its Play to try again.`) }
+    })
+  }, [fetchNext])
 
   // ---- the audio element's own events, wired once
   useEffect(() => {
@@ -144,10 +181,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (t) store.write(positionKey(t.key), null)
       setResumed(null)
       paint(dur(el), dur(el))
+      if (t && continuesRef.current) advance(t, true)
     }
     const onTime = () => {
       setTime(el.currentTime)
       if (Date.now() - lastSaved.current > SAVE_EVERY_MS) { lastSaved.current = Date.now(); remember() }
+      const t = trackRef.current
+      if (t && continuesRef.current && Number.isFinite(el.duration) && el.duration - el.currentTime < PREFETCH_SECONDS) fetchNext(t)
     }
     const onDuration = () => { setLength(Number.isFinite(el.duration) ? el.duration : 0); syncSession() }
     const onWaiting = () => setWaiting(true)
@@ -165,7 +205,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       for (const [name, handler] of events) el.removeEventListener(name, handler)
       window.removeEventListener('pagehide', onHide)
     }
-  }, [paint, remember, dur])
+  }, [paint, remember, dur, advance, fetchNext])
 
   // A blob URL holds the whole file in memory until it is revoked.
   const url = track?.url
@@ -241,6 +281,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         remember()
         const loaded: Loaded = { ...next, url: URL.createObjectURL(next.blob) }
         trackRef.current = loaded
+        upcoming.current = null // played now, or not wanted: either way not held in memory
+        setNotice('')
         setFailed(false)
         setWaiting(true)
         setResumed(null)
@@ -260,6 +302,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setFailed(false)
         setResumed(null)
         setSleepState(null)
+        setNotice('')
+        upcoming.current = null
         setTime(0)
         setLength(0)
         paint(0, 0)
@@ -276,6 +320,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setVolume: (v) => { setVolumeState(Math.min(1, Math.max(0, v))); setMuted(false) },
       setMuted,
       setSleep: (minutes) => setSleepState(minutes === null ? null : { minutes, endsAt: Date.now() + minutes * 60_000 }),
+      setContinues(on) {
+        setContinuesState(on)
+        store.write(CONTINUE_KEY, on ? '1' : '0')
+      },
+      playNext() {
+        const t = trackRef.current
+        if (t?.next) advance(t, false)
+      },
+      playPrevious() {
+        const t = trackRef.current
+        if (!t?.previous) return
+        setWaiting(true)
+        void t.previous.load().then(
+          (track) => { if (trackRef.current === t) openRef.current(track) },
+          () => { if (trackRef.current === t) { setWaiting(false); setNotice(`Could not fetch ${t.previous!.title}.`) } },
+        )
+      },
       startOver() {
         seek(0)
         setResumed(null)
@@ -294,11 +355,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return () => setFullViews((n) => n - 1)
       },
     }
-  }, [paint, remember, dur])
+  }, [paint, remember, dur, advance])
+  openRef.current = actions.open
 
   // ---- lock screen and headphone controls
   const title = track?.title
   const album = track?.album ?? 'Audiobook'
+  const hasNext = Boolean(track?.next)
+  const hasPrevious = Boolean(track?.previous)
   useEffect(() => {
     if (!('mediaSession' in navigator) || !title) return
     const session = navigator.mediaSession
@@ -309,16 +373,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     set('seekbackward', (d) => actions.skip(-(d.seekOffset ?? BACK)))
     set('seekforward', (d) => actions.skip(d.seekOffset ?? FORWARD))
     set('seekto', (d) => { if (d.seekTime !== undefined) actions.seek(d.seekTime) })
+    set('nexttrack', hasNext ? () => actions.playNext() : null)
+    set('previoustrack', hasPrevious ? () => actions.playPrevious() : null)
     return () => {
-      for (const a of ['play', 'pause', 'seekbackward', 'seekforward', 'seekto'] as const) set(a, null)
+      for (const a of ['play', 'pause', 'seekbackward', 'seekforward', 'seekto', 'nexttrack', 'previoustrack'] as const) set(a, null)
       session.metadata = null
     }
-  }, [title, album, actions])
+  }, [title, album, hasNext, hasPrevious, actions])
 
   const duration = length > 0 ? length : wave.seconds
   const state = useMemo<PlayerState>(
-    () => ({ track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave, fullViews }),
-    [track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave, fullViews],
+    () => ({ track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave, fullViews, continues, notice }),
+    [track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave, fullViews, continues, notice],
   )
   const clockValue = useMemo<PlayerClock>(() => ({ time, duration, sleepLeft }), [time, duration, sleepLeft])
 

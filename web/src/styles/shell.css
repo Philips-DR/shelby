@@ -151,6 +151,14 @@
 .conn-pill.busy .conn-dot::after { animation-duration: 1s; }
 .conn-pill.down .conn-dot { background: var(--warn-fill); }
 .conn-pill.down { color: var(--warn); }
+/* the model cannot be reached: red, in words, and a link to the fix */
+.conn-pill.bad .conn-dot { background: var(--bad-fill); }
+.conn-pill.bad { color: var(--bad); text-decoration: none; }
+a.conn-pill.bad:hover { text-decoration: underline; }
+/* no model set up: information, not a fault, so no alarm colour */
+.conn-pill.none .conn-dot { background: var(--ink-3); }
+a.conn-pill.none { text-decoration: none; }
+a.conn-pill.none:hover { text-decoration: underline; }
 
 .theme-switch {
   display: inline-flex;
@@ -426,6 +434,7 @@ button.sheet-item:hover:not(:disabled) { background: var(--brand-soft); border: 
   .page.page-chat .pagehead { display: none; }
   .notices { right: 12px; left: 12px; width: auto; bottom: calc(var(--tab-h) + env(safe-area-inset-bottom, 0px) + 12px); }
   .topbar .conn-text { display: none; }
+  .topbar .conn-pill.bad .conn-text { display: inline; }   /* a model that cannot be reached is said in words, not only a red dot */
 }
 
 @media (min-width: 640px) {

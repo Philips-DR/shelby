@@ -206,7 +206,11 @@ export function Chat() {
       }
       case 'turn_error':
         flush(`c${event.seq}`)
-        rows.push(<div key={event.seq} className="chat-error" role="alert">Something went wrong: {event.error}</div>)
+        rows.push(
+          <div key={event.seq} className="chat-error" role="alert">
+            {event.settings ? <>{event.error} <a href="#settings">Open Settings</a></> : <>Something went wrong: {event.error}</>}
+          </div>,
+        )
         break
       case 'turn_stopped':
         flush(`c${event.seq}`)

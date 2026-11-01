@@ -2,7 +2,8 @@
 // recording stopped with a button be the one the model writes up in chat.
 
 import { createContext, useCallback, useContext, useEffect, useReducer, type ReactNode } from 'react'
-import { getState, getTools, openEvents, type Approval, type AssistantEvent } from './api'
+import { getState, getStatus, getTools, openEvents, type Approval, type AssistantEvent } from './api'
+import { loginOf, type ModelLogin } from './loginState'
 
 interface State {
   events: AssistantEvent[]
@@ -10,6 +11,8 @@ interface State {
   busy: boolean
   connected: boolean
   model: string
+  /** Whether the model can be reached, as the last check found it; null before any check. */
+  login: ModelLogin
   tools: Set<string>
   /** Each tool's own title for a person, by qualified name: what Chat and an approval call it. */
   titles: Record<string, string>
@@ -23,8 +26,9 @@ type Action =
   | { type: 'event'; event: AssistantEvent }
   | { type: 'connected'; value: boolean }
   | { type: 'tools'; names: string[]; titles: Record<string, string> }
+  | { type: 'login'; value: ModelLogin }
 
-const initial: State = { events: [], pending: [], busy: false, connected: false, model: '', tools: new Set(), titles: {}, openedAt: null }
+const initial: State = { events: [], pending: [], busy: false, connected: false, model: '', login: null, tools: new Set(), titles: {}, openedAt: null }
 
 function reduce(state: State, action: Action): State {
   switch (action.type) {
@@ -43,6 +47,8 @@ function reduce(state: State, action: Action): State {
       return { ...state, connected: action.value }
     case 'tools':
       return { ...state, tools: new Set(action.names), titles: action.titles }
+    case 'login':
+      return state.login === action.value ? state : { ...state, login: action.value }
     case 'event': {
       const event = action.event
       // A reconnect replays from a fresh snapshot; drop anything already held.
@@ -84,6 +90,8 @@ function reduce(state: State, action: Action): State {
 
 interface Context extends State {
   refresh: () => Promise<void>
+  /** Ask what the last login check found (cheap: the server remembers it) and update the sidebar. */
+  refreshLogin: () => Promise<void>
 }
 
 const AppState = createContext<Context | null>(null)
@@ -105,6 +113,22 @@ export function StateProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  // The sidebar says whether the model can be reached. The server checks every ten minutes (every minute while the
+  // login is out) and remembers; this reads what it found, so it is cheap and needs no event of its own.
+  const refreshLogin = useCallback(async () => {
+    try {
+      dispatch({ type: 'login', value: loginOf((await getStatus(false)).model) })
+    } catch {
+      // keep what was shown: a failed read says nothing about the login
+    }
+  }, [])
+  useEffect(() => {
+    if (!state.connected) return
+    void refreshLogin()
+    const timer = window.setInterval(() => void refreshLogin(), 60_000)
+    return () => window.clearInterval(timer)
+  }, [state.connected, refreshLogin])
+
   useEffect(() => {
     let source: import('./api').EventStream | null = null
     let cancelled = false
@@ -123,6 +147,8 @@ export function StateProvider({ children }: { children: ReactNode }) {
         // The server decides what counts as conversation; this page takes its pruned history rather than
         // keeping a second copy of that rule.
         if (event.type === 'chat_cleared') refresh().catch(() => {})
+        // A login going bad, or coming back, is announced as a notice: look at once rather than wait for the minute.
+        if (event.type === 'notice') void refreshLogin()
       }
       source.onerror = () => {
         dispatch({ type: 'connected', value: false })
@@ -143,9 +169,9 @@ export function StateProvider({ children }: { children: ReactNode }) {
       cancelled = true
       source?.close()
     }
-  }, [refresh])
+  }, [refresh, refreshLogin])
 
-  return <AppState.Provider value={{ ...state, refresh }}>{children}</AppState.Provider>
+  return <AppState.Provider value={{ ...state, refresh, refreshLogin }}>{children}</AppState.Provider>
 }
 
 export function useAppState(): Context {

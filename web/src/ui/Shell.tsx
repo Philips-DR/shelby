@@ -3,16 +3,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useAppState } from '../state'
+import { modelName } from './modelName'
 import { toolColor } from '../charts/palette'
 import { IconClose, IconCommand, IconMoon, IconMore, IconSearch, IconSun, IconSystem } from './icons'
 import { SECTIONS, TAB_SECTIONS, sectionById, type Section } from './sections'
 import type { ThemeChoice } from './useTheme'
 
-/** "us.anthropic.claude-opus-4-6-v1" -> "Opus 4.6". The full id is the tooltip. */
-export function modelName(id: string): string {
-  const match = /claude-([a-z]+)-(\d+)-(\d+)/.exec(id)
-  return match ? `${match[1]![0]!.toUpperCase()}${match[1]!.slice(1)} ${match[2]}.${match[3]}` : id || 'Assistant'
-}
+const FAULT_WORDS = { 'signed-out': 'Signed out', 'key-refused': 'Key refused', 'model-missing': 'Model unavailable', unreachable: 'Not reachable' } as const
 
 export function BrandMark({ size = 30 }: { size?: number }) {
   return (
@@ -26,8 +23,28 @@ export function BrandMark({ size = 30 }: { size?: number }) {
 }
 
 export function ConnectionPill() {
-  const { connected, busy, model } = useAppState()
-  const state = !connected ? 'down' : busy ? 'busy' : 'up'
+  const { connected, busy, model, login } = useAppState()
+  // A model that cannot be used is the one thing here that stops the assistant answering, so it outranks "Working".
+  const fault = connected && login && login in FAULT_WORDS ? FAULT_WORDS[login as keyof typeof FAULT_WORDS] : null
+  const state = !connected ? 'down' : fault ? 'bad' : busy ? 'busy' : 'up'
+  if (fault) {
+    // Said in words, and a way to the fix: Settings has it.
+    return (
+      <a className="conn-pill bad" href="#settings" title={`${modelName(model)}: ${fault.toLowerCase()}. Open Settings to fix it.`} aria-label={`${modelName(model)}: ${fault.toLowerCase()}. Open Settings`}>
+        <span className="conn-dot" aria-hidden />
+        <span className="conn-text">{fault}</span>
+      </a>
+    )
+  }
+  if (connected && login === 'not-set-up') {
+    // Not a fault: every page but Chat and meeting notes works without a model. Said plainly, and a way to add one.
+    return (
+      <a className="conn-pill none" href="#settings" title="No model is set up. Chat and meeting notes need one; open Settings to see how." aria-label="No model set up. Open Settings">
+        <span className="conn-dot" aria-hidden />
+        <span className="conn-text">No model</span>
+      </a>
+    )
+  }
   return (
     <div className={`conn-pill ${state}`} title={model || undefined}>
       <span className="conn-dot" aria-hidden />

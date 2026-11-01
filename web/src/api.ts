@@ -149,6 +149,7 @@ export type EventType =
   | 'notice'
   | 'upload'
   | 'upload_deleted'
+  | 'records_changed'
   | 'chat_cleared'
 
 export interface AssistantEvent {
@@ -162,6 +163,10 @@ export interface AssistantEvent {
   arguments?: Record<string, unknown>
   result?: string
   error?: string
+  /** On a failed turn: the raw error, kept beside the plain one in `error`. */
+  detail?: string
+  /** On a failed turn: the model is the trouble, and Settings has the fix. */
+  settings?: boolean
   id?: string
   approved?: boolean
   server?: string
@@ -239,6 +244,8 @@ export interface AuditRow {
 export const getHistory = (limit = 200) => request<AuditRow[]>(`/api/history?limit=${limit}`)
 
 export type Level = 'ok' | 'warning' | 'error'
+/** What a tool's own check of its login found: ok; dead (refused, sign in again); missing (never signed in); unknown (could not tell). */
+export type LoginState = 'ok' | 'dead' | 'missing' | 'unknown'
 
 export interface Status {
   tools: {
@@ -246,6 +253,8 @@ export interface Status {
     tools: number
     level: Level
     last_call: { at: string; tool: string; outcome: string; error: string } | null
+    /** Null until a check has asked; `service` is what the tool calls it ("Gmail"). */
+    login?: { state: LoginState; detail: string; service: string; checked_at?: number } | null
   }[]
   model: {
     provider: string
@@ -257,6 +266,16 @@ export interface Status {
     role?: string
     detail?: string
     hint?: string
+    /** The AWS login has expired (as opposed to the model being out of reach for another reason). */
+    signed_out?: boolean
+    /** An API key is in use and Anthropic refused it. */
+    key_refused?: boolean
+    /** An API key is in use and the model asked for is not one it can use; `available` names what it can. */
+    model_missing?: boolean
+    available?: string[]
+    /** False when there is no model to try at all (no key, no AWS login): information, not a fault. */
+    configured?: boolean
+    checked_at?: number
   }
   mail_compose: boolean
   network?: {
@@ -282,11 +301,11 @@ export const clearChat = () => request<{ cleared: number }>('/api/chat/clear', {
 export const stopChat = () => request<{ stopping: boolean }>('/api/chat/stop', { method: 'POST' })
 
 export type UploadKind = 'audio' | 'book' | 'voice' | 'docs'
-export interface DeletedUpload { kind: UploadKind; name: string; files: number; bytes: number }
+export interface DeletedUpload { id: string; kind: UploadKind; name: string; files: number; bytes: number }
 
-/** Delete one upload, by the kind and name the listing gave. Only buttons can: no tool offers it. */
-export const deleteUpload = (kind: UploadKind, name: string) =>
-  request<DeletedUpload>('/api/uploads/delete', { method: 'POST', body: JSON.stringify({ kind, name }) })
+/** Delete one upload, by the id the listing gave it (two uploads may share a name). Only buttons can: no tool offers it. */
+export const deleteUpload = (id: string) =>
+  request<DeletedUpload>('/api/uploads/delete', { method: 'POST', body: JSON.stringify({ id }) })
 
 export const answerApproval = (id: string, approve: boolean) =>
   request<{ approved: boolean }>(`/api/approvals/${encodeURIComponent(id)}`, {
@@ -380,8 +399,9 @@ const ext = (name: string) => name.slice(name.lastIndexOf('.')).toLowerCase()
 export const isAudio = (name: string) => AUDIO_EXTS.includes(ext(name))
 export const isMarkdown = (name: string) => ext(name) === '.md'
 
-export interface UploadedAudio { name: string; path: string; bytes: number }
-export interface UploadedDocs { name: string; path: string; files: string[] }
+// `id` is the upload's in the file store: what deleting goes by, since the same name may be uploaded twice.
+export interface UploadedAudio { id: string; name: string; path: string; bytes: number }
+export interface UploadedDocs { id: string; name: string; path: string; files: string[] }
 export interface Uploads {
   audio: (UploadedAudio & { at: number })[]
   docs: (UploadedDocs & { at: number })[]
@@ -437,8 +457,35 @@ export const uploadVoice = (file: File, onProgress?: (fraction: number) => void)
  * fetched here and handed to the player as a blob, rather than an <audio> tag being pointed at a
  * URL -- which would mean putting the token in the URL, where it is kept in logs and history.
  */
-export async function fetchMedia(path: string): Promise<Blob> {
-  const response = await fetch(`${API_URL}/api/files?path=${encodeURIComponent(path)}`, {
+export const fetchMedia = (path: string): Promise<Blob> => fetchBlob(`/api/files?path=${encodeURIComponent(path)}`)
+
+/** A file the suite keeps, by its id: an upload, or audio a tool made and handed over (assistant/collect.py). */
+export const fetchStored = (id: string): Promise<Blob> => fetchBlob(`/api/files/${encodeURIComponent(id)}`)
+
+/**
+ * What a tool made that the suite keeps, filed under the tool's own labels (assistant/records.py). The server does
+ * not know what any of it is; the page that shows it does (Audiobooks knows a chapter).
+ */
+export interface KeptFile { id: string; name: string; bytes: number }
+export interface Kept {
+  id: string
+  tool: string
+  kind: string
+  key: string
+  labels: Record<string, unknown>
+  files: Record<string, KeptFile>
+  created: number
+  updated: number
+}
+
+export const getKept = (tool: string) => request<{ records: Kept[] }>(`/api/records?tool=${encodeURIComponent(tool)}`)
+
+/** Delete kept records and their files. Only a button reaches this; the server audits it. */
+export const deleteKept = (ids: string[]) =>
+  request<{ deleted: number; bytes: number }>('/api/records/delete', { method: 'POST', body: JSON.stringify({ ids }) })
+
+async function fetchBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${API_URL}${path}`, {
     credentials: 'include',
     headers: { ...NGROK_HEADER, ...(token ? { 'x-assistant-token': token } : {}) },
   })

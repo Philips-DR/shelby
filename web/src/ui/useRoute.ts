@@ -22,8 +22,11 @@ export function useRoute(): [Section, (to: Section) => void] {
   }, [])
 
   const go = useCallback((to: Section) => {
-    if (location.hash !== `#${to}`) location.hash = to
-    else setSection(to)
+    if (location.hash !== `#${to}`) {
+      // Chosen from a sheet or the search box: that replaces its entry (see useLayer.ts), so Back leaves it behind.
+      if ((history.state as { modal?: boolean } | null)?.modal) location.replace(`#${to}`)
+      else location.hash = to
+    } else setSection(to)
     window.scrollTo({ top: 0 })
   }, [])
 
