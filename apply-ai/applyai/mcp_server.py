@@ -7,7 +7,8 @@ first, so that what a person is asked to approve has already been through them.
 
 Source files are read from disk by this tool, never passed in as text: a model retyping a CV could let a
 paraphrase stand in for the source, and then the check would be against the paraphrase. They are confined
-to the folders in APPLY_AI_ROOTS (tools.yaml injects the uploads folder).
+to the folders in APPLY_AI_ROOTS (tools.yaml injects the folder where the assistant lends a stored document
+for one call; the text itself is in its database, which no tool reaches).
 """
 
 from __future__ import annotations

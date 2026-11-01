@@ -36,7 +36,9 @@ not read for meaning at all.
 
 - **Sources are read from disk by this tool, never passed in as text.** A model retyping a CV could let a
   paraphrase stand in for the source, and the check would then be against the paraphrase. Reads are confined
-  to `APPLY_AI_ROOTS` (tools.yaml injects the uploads folder), resolved before the test, so `..` and a
+  to `APPLY_AI_ROOTS` (tools.yaml injects the folder where the assistant lends a stored document for the length
+  of one call, with `.draft` in a draft's copy; since 2026-10-31 the text is in the assistant's database, which
+  this tool never reaches), resolved before the test, so `..` and a
   symlink out are refused. The draft and the posting are text, because they are the model's own words and the
   user's pasted page.
 - **A draft the assistant wrote is never the user's material.** Found live: on a second application the model
