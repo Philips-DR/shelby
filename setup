@@ -18,12 +18,26 @@ need node    "install Node 24"
 need npm     "install Node 24"
 need ffmpeg  "meet-ai records and decodes audio with it"
 
+# The speech models (Whisper in meet-ai, Pocket TTS in audiobook) use an NVIDIA card when there is one,
+# which needs NVIDIA builds of their libraries: found by its driver answering. SUITE_GPU in .env or the
+# environment overrides it: cpu installs the CPU builds even so, nvidia installs NVIDIA's without asking.
+[[ -z "${SUITE_GPU:-}" && -f .env ]] && SUITE_GPU="$(sed -n 's/^SUITE_GPU=//p' .env | tail -1)"
+case "${SUITE_GPU:-auto}" in
+  cpu|nvidia) gpu="$SUITE_GPU" ;;
+  *) if nvidia-smi -L >/dev/null 2>&1; then gpu=nvidia; else gpu=cpu; fi ;;
+esac
+nvidia=()
+if [[ $gpu == nvidia ]]; then
+  echo "An NVIDIA card: the speech models get NVIDIA's builds (about 4 GB more to download)."
+  nvidia=(-r meet-ai/requirements-nvidia.txt)
+fi
+
 step "Python environment (.venv), shared by assistant, meet-ai, mail-ai, apply-ai and web-ai"
 [[ -x .venv/bin/python ]] || python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q \
   -r assistant/requirements.txt \
-  -r meet-ai/requirements.txt -r meet-ai/requirements-dev.txt \
+  -r meet-ai/requirements.txt -r meet-ai/requirements-dev.txt "${nvidia[@]}" \
   -r mail-ai/requirements.txt -r mail-ai/requirements-dev.txt \
   -r apply-ai/requirements.txt -r apply-ai/requirements-dev.txt \
   -r web-ai/requirements.txt -r web-ai/requirements-dev.txt
@@ -32,8 +46,7 @@ step "Python environment (.venv), shared by assistant, meet-ai, mail-ai, apply-a
 step "audiobook's own Python environment (audiobook/.venv)"
 [[ -x audiobook/.venv/bin/python ]] || python3 -m venv audiobook/.venv
 audiobook/.venv/bin/pip install -q --upgrade pip
-audiobook/.venv/bin/pip install -q -r audiobook/requirements.txt -r audiobook/requirements-dev.txt
-audiobook/.venv/bin/pip check
+audiobook/install-deps audiobook/.venv/bin/python "$gpu"
 [[ -f audiobook/.env ]] || echo "  audiobook/.env is missing: cloned voices need HF_TOKEN=<a Hugging Face token> in it (see audiobook/CLAUDE.md)."
 
 step "docu-ai (Node)"

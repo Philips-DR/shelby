@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Every login the suite depends on, in one command:
 #
-#   aws           the model, through Bedrock (AWS SSO; lapses overnight)
+#   aws           the model, through Bedrock (AWS SSO; lapses overnight) -- unless ANTHROPIC_API_KEY is set
+#   anthropic     the model, through an Anthropic API key (checked, never renewed here: replace it in .env)
 #   docu-ai       Google Docs, to build documents
 #   mail-ai       Gmail, read-only
 #   mail-compose  Gmail, drafting and sending (a separate, wider token; only if set up)
@@ -26,7 +27,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 [[ -x .venv/bin/python ]] || { echo "Not set up yet. Run ./setup first." >&2; exit 1; }
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
-ALL=(aws docu-ai mail-ai mail-compose)
+# An API key in .env wins over Bedrock, as it does in the assistant and in meet-ai (`resolve_provider`).
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then MODEL_LOGIN=anthropic; else MODEL_LOGIN=aws; fi
+ALL=("$MODEL_LOGIN" docu-ai mail-ai mail-compose)
 
 # Is a Google refresh token still accepted? Prints ok, dead, missing or unknown (no network,
 # or an answer we cannot read), and a reason on the second line.
@@ -64,6 +67,24 @@ except OSError as e:
 PY
 }
 
+# Does Anthropic accept the key? One read of the model list, which spends nothing. Prints ok, dead (refused) or
+# unknown (no network, or any other answer), and a reason on the second line. The key is never printed.
+anthropic_check() {
+  .venv/bin/python - <<'ANTHROPIC_PY'
+import os, urllib.request, urllib.error
+req = urllib.request.Request("https://api.anthropic.com/v1/models?limit=1",
+                             headers={"x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""), "anthropic-version": "2023-06-01"})
+try:
+    urllib.request.urlopen(req, timeout=15)
+    print("ok"); print("")
+except urllib.error.HTTPError as e:
+    if e.code in (401, 403): print("dead"); print("the API key was refused")
+    else: print("unknown"); print(f"Anthropic answered {e.code}")
+except OSError as e:
+    print("unknown"); print(f"could not reach Anthropic: {e}")
+ANTHROPIC_PY
+}
+
 check() {  # <name> → sets state and reason
   local out
   case $1 in
@@ -71,6 +92,8 @@ check() {  # <name> → sets state and reason
       if out=$(aws sts get-caller-identity --profile "${AWS_PROFILE:?AWS_PROFILE is not set in .env}" \
                  --query Arn --output text 2>&1); then state=ok; reason=${out##*/}
       else state=dead; reason=$(tail -1 <<<"$out"); fi ;;
+    anthropic)
+      out=$(anthropic_check) ;;
     docu-ai)
       out=$(google_check docu-ai/credentials.json "${DOCU_AI_TOKEN:-$CONFIG/docu-ai/token.json}") ;;
     mail-ai)
@@ -103,7 +126,7 @@ container_token() {
 # all the time and only the refresh token says whether they are the same login. Written atomically with
 # mode 600; nothing is printed of the token itself.
 container_sync() {  # <login> <write|report>
-  [[ $1 != aws && -d data/config ]] || { echo none; return; }
+  [[ $1 != aws && $1 != anthropic && -d data/config ]] || { echo none; return; }
   .venv/bin/python - "$(host_token "$1")" "$(container_token "$1")" "$2" <<'PY'
 import json, os, sys, tempfile
 src, dest, mode = sys.argv[1:4]
@@ -138,6 +161,8 @@ container_note() {  # <login> <write|report>
 renew() {
   case $1 in
     aws)          aws sso login --profile "$AWS_PROFILE" ;;
+    # A key is not renewed by a browser: it is replaced, in .env, and the containers read it when they are started.
+    anthropic)    echo "  Put a working key in .env as ANTHROPIC_API_KEY=..., then run ./start-docker up."; return 1 ;;
     docu-ai)      (cd docu-ai && npm run --silent auth) ;;
     mail-ai)      (cd mail-ai && ./mail auth) ;;
     mail-compose) (cd mail-ai && ./mail auth --compose) ;;
@@ -149,7 +174,7 @@ for arg in "$@"; do
   case $arg in
     --check) mode=check ;;
     -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    aws|docu-ai|mail-ai|mail-compose) targets+=("$arg"); mode=force ;;
+    aws|anthropic|docu-ai|mail-ai|mail-compose) targets+=("$arg"); mode=force ;;
     *) echo "unknown login: $arg (one of: ${ALL[*]})" >&2; exit 1 ;;
   esac
 done

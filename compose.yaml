@@ -66,6 +66,13 @@ services:
       # Where each tool keeps what it keeps: all under the one volume.
       ASSISTANT_MEMORY: /data/assistant/memory.json
       ASSISTANT_AUDIT: /data/assistant/audit.jsonl
+      # The central file store: every upload, in a folder of its own, recorded in the database (plan.md, layer 1b).
+      ASSISTANT_FILES: /data/files
+      # Markdown is in the database itself; a tool that reads one gets a copy here for that one call, removed
+      # after it. Never kept, so inside the container and not under /data.
+      ASSISTANT_TEXTS: /tmp/assistant-texts
+      # The old uploads folder: what is left in it is copied into the store on start, once. Its exports/ stays:
+      # docu-ai saves files there for mail-ai to attach (tools.yaml).
       ASSISTANT_UPLOADS: /data/assistant/uploads
       MEET_AI_AUDIO: /data/meet-ai/audio
       MEET_AI_TRANSCRIPTS: /data/meet-ai/transcripts

@@ -1,0 +1,16 @@
+# The speech models on an NVIDIA card: Whisper (meet-ai) transcribes and Pocket TTS (audiobook) speaks on it,
+# and Docling reads books on it. ./start-docker adds this file by itself when the host has an NVIDIA card and
+# Docker can hand it to a container (the NVIDIA Container Toolkit); SUITE_GPU=cpu in .env keeps it out.
+# The image is built with NVIDIA's libraries (docker/backend.Dockerfile, GPU=nvidia); the driver is the host's.
+services:
+  backend:
+    build:
+      args:
+        GPU: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -17,7 +17,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 command -v docker >/dev/null || { echo "docker is not installed." >&2; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "needs the Docker Compose plugin (docker compose)." >&2; exit 1; }
 
-[[ -f .env ]] || { cp .env.example .env; echo "Wrote .env from .env.example -- check the AWS profile in it."; }
+[[ -f .env ]] || { cp .env.example .env; echo "Wrote .env from .env.example -- put an ANTHROPIC_API_KEY in it, or check the AWS profile (the model is optional: only Chat and meeting notes need one)."; }
 set -a; source .env; set +a
 export SUITE_UID="$(id -u)" SUITE_GID="$(id -g)"
 
@@ -40,10 +40,35 @@ if $use_ngrok && [[ "$cmd" == up && -z "${NGROK_AUTHTOKEN:-}" ]]; then
   echo "--ngrok needs NGROK_AUTHTOKEN in .env (see .env.example)." >&2
   exit 1
 fi
+# The speech models use an NVIDIA card when the host has one (its driver answers) and Docker can hand it to a
+# container (the NVIDIA Container Toolkit has given Docker its runtime). SUITE_GPU=cpu in .env says no;
+# SUITE_GPU=nvidia skips the looking. A card Docker cannot reach is said once, and the suite runs on the CPU.
+gpu_note=""
+case "${SUITE_GPU:-auto}" in
+  cpu) ;;
+  nvidia) files+=(-f compose.nvidia.yaml) ;;
+  *)
+    if nvidia-smi -L >/dev/null 2>&1; then
+      if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"' || command -v nvidia-container-runtime-hook >/dev/null; then
+        files+=(-f compose.nvidia.yaml)
+      else
+        gpu_note="There is an NVIDIA card, but Docker cannot hand it to a container: install the NVIDIA Container Toolkit
+(https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), then run this again.
+Until then the speech models run on the CPU."
+      fi
+    fi ;;
+esac
+if [[ "$cmd" == up ]]; then
+  if [[ " ${files[*]} " == *" compose.nvidia.yaml "* ]]; then
+    echo "The speech models run on the NVIDIA card (the first build downloads about 4 GB more)."
+  elif [[ -n "$gpu_note" ]]; then
+    echo "$gpu_note"
+  fi
+fi
 dc() { docker compose "${files[@]}" "${profiles[@]}" "$@"; }
 
 make_data() {
-  mkdir -p data/assistant/uploads data/postgres data/config/docu-ai data/config/mail-ai data/docu-ai data/mail-ai \
+  mkdir -p data/files data/assistant/uploads data/postgres data/config/docu-ai data/config/mail-ai data/docu-ai data/mail-ai \
            data/meet-ai/audio data/meet-ai/transcripts data/cache/huggingface \
            data/audiobook/{voices,voice,output,cache,jobs}
   mkdir -p "${AWS_CONFIG_DIR:-$HOME/.aws}"   # else Docker would make it, owned by root

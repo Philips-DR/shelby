@@ -13,12 +13,19 @@ ARG NODE=24-slim
 FROM node:${NODE} AS node
 FROM python:${PYTHON} AS python
 
+# cpu, or nvidia for NVIDIA's builds of the speech models' libraries (about 4 GB more): cuBLAS for meet-ai's
+# Whisper, PyTorch's CUDA build for audiobook. ./start-docker passes nvidia when the host has an NVIDIA card
+# Docker can hand to a container (compose.nvidia.yaml). The image needs no CUDA of its own: the driver comes
+# from the host, the rest from these packages.
+ARG GPU=cpu
+
 # --- the suite's shared Python environment (assistant, meet-ai, mail-ai, apply-ai, web-ai) -----------------
 # Built at the path it will run from, since a venv's scripts name their own location.
 FROM python AS shared-venv
+ARG GPU
 WORKDIR /app
 COPY assistant/requirements.txt assistant/
-COPY meet-ai/requirements.txt meet-ai/requirements-dev.txt meet-ai/
+COPY meet-ai/requirements.txt meet-ai/requirements-dev.txt meet-ai/requirements-nvidia.txt meet-ai/
 COPY mail-ai/requirements.txt mail-ai/requirements-dev.txt mail-ai/
 COPY apply-ai/requirements.txt apply-ai/requirements-dev.txt apply-ai/
 COPY web-ai/requirements.txt web-ai/requirements-dev.txt web-ai/
@@ -26,19 +33,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python -m venv .venv \
  && .venv/bin/pip install -r assistant/requirements.txt \
       -r meet-ai/requirements.txt -r meet-ai/requirements-dev.txt \
+      $([ "$GPU" = nvidia ] && echo -r meet-ai/requirements-nvidia.txt) \
       -r mail-ai/requirements.txt -r mail-ai/requirements-dev.txt \
       -r apply-ai/requirements.txt -r apply-ai/requirements-dev.txt \
       -r web-ai/requirements.txt -r web-ai/requirements-dev.txt \
  && .venv/bin/pip check
 
-# --- audiobook's own: torch (CPU build), Docling, Pocket TTS -- ~1.9 GB nothing else uses -----------
+# --- audiobook's own: torch, Docling, Pocket TTS -- ~1.9 GB nothing else uses (CPU build) -------------
 FROM python AS audiobook-venv
+ARG GPU
 WORKDIR /app/audiobook
-COPY audiobook/requirements.txt audiobook/requirements-dev.txt ./
+COPY audiobook/requirements.txt audiobook/requirements-dev.txt audiobook/requirements-nvidia.txt audiobook/install-deps ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m venv .venv \
- && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt \
- && .venv/bin/pip check
+ && ./install-deps .venv/bin/python "$GPU"
 
 # --- docu-ai's Node packages (tsx, which runs it, is a dev dependency) -----------------------------
 FROM node AS docu-ai-deps
