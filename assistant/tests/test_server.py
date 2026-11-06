@@ -547,8 +547,8 @@ class DictConversations:
     async def get(self, conversation_id):
         return self.rows.get(conversation_id)
 
-    async def save(self, conversation_id, title, events, message_count):
-        self.rows[conversation_id] = {"id": conversation_id, "title": title, "events": events,
+    async def save(self, conversation_id, title, events, message_count, messages=None):
+        self.rows[conversation_id] = {"id": conversation_id, "title": title, "events": events, "messages": messages,
                                       "message_count": message_count, "created_at": "2026-11-06T09:00:00+00:00",
                                       "updated_at": "2026-11-06T09:00:00+00:00"}
         return conversation_id
@@ -734,3 +734,24 @@ def test_renaming_the_conversation_chat_is_in_survives_its_next_message(tmp_path
         return store.rows["a" * 32]["title"]
 
     assert run(with_client(app, body)) == "Kwame and the budget"
+
+
+def test_a_conversation_the_database_will_not_take_is_logged_and_nothing_breaks(tmp_path, caplog):
+    """Found while adding continuing: the warning named a logger server.py never had, so a failed save raised."""
+    class Broken(DictConversations):
+        async def save(self, *args, **kwargs):
+            raise OSError("the database went away")
+
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = Broken()
+        hub.conversation_id = "a" * 32
+        await hub.emit({"type": "user_message", "text": "hi"})
+        return await client.post("/api/chat/clear", headers=AUTH)
+
+    with caplog.at_level("WARNING", logger="assistant.server"):
+        cleared = run(with_client(app, body))
+    assert cleared.status_code == 200
+    assert any("could not save conversation" in r.getMessage() for r in caplog.records)

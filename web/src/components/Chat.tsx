@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AUDIO_EXTS, clearChat, getConversation, isAudio, isMarkdown, sendChat, splitDocs, stopChat, uploadAudio, uploadDocs, type AssistantEvent } from '../api'
+import { AUDIO_EXTS, clearChat, continueConversation, getConversation, isAudio, isMarkdown, sendChat, splitDocs, stopChat, uploadAudio, uploadDocs, type AssistantEvent } from '../api'
 import { useAppState } from '../state'
 import { BrandMark } from '../ui/Shell'
 import { DropZone } from '../ui/DropZone'
@@ -191,6 +191,12 @@ export function Chat() {
     setError('')
     speech.stop() // a new message: the old reply stops being read
     try {
+      // Written in a past conversation: it becomes the one Chat is in (the current one is kept in History), and the
+      // message carries on from it, with what the model remembered of it.
+      if (viewing) {
+        await continueConversation(viewing.id)
+        setLayer(null)
+      }
       await sendChat(message)
       setDraft('')
       setAttached([])
@@ -327,7 +333,7 @@ export function Chat() {
       label="Drop audio or markdown to attach"
       onRefuse={(names) => setError(`Not attached — only audio or markdown: ${names.join(', ')}`)}
       onFiles={(files) => void attach(files)}
-      disabled={!connected || uploading !== null}
+      disabled={!connected || uploading !== null || viewing !== null}
     >
       <h1 className="sr-only">Chat</h1>
       <div className="chat-tools">
@@ -400,14 +406,9 @@ export function Chat() {
         </div>
       )}
 
-      {viewing ? (
-        <div className="viewing-footer">
-          <button className="primary" onClick={() => setLayer(null)}>Back to current chat</button>
-        </div>
-      ) : (
-        <>
+      <>
           <form className={`composer${listening ? ' listening' : ''}`} onSubmit={(e) => void submit(e)}>
-            {!listening && <PickFiles
+            {!listening && !viewing && <PickFiles
               label=""
               ariaLabel="Attach a recording or a markdown file"
               icon={<IconAttach size={18} aria-hidden />}
@@ -422,7 +423,8 @@ export function Chat() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKey}
-              placeholder={!connected ? 'Reconnecting…' : listening ? 'Listening…' : writing ? 'Writing down what you said…' : busy ? 'Working…' : 'Message the assistant'}
+              placeholder={!connected ? 'Reconnecting…' : listening ? 'Listening…' : writing ? 'Writing down what you said…'
+                : viewing ? (busy ? 'Wait for the reply in your current chat' : 'Write to continue this chat') : busy ? 'Working…' : 'Message the assistant'}
               disabled={!connected}
               rows={1}
               aria-label="Message"
@@ -445,24 +447,24 @@ export function Chat() {
                   {writing ? <span className="mic-spinner" aria-hidden /> : <IconMic size={18} aria-hidden />}
                 </button>
               ))}
-            {busy
+            {busy && !viewing
               ? (
                 <button className="send stop" type="button" onClick={() => void stop()} disabled={stopping} aria-label={stopping ? 'Stopping the reply' : 'Stop the reply'} title="Stop">
                   <IconStop size={16} aria-hidden />
                 </button>
               )
               : (
-                <button className="primary send" type="submit" disabled={!draft.trim() || !connected} aria-label="Send">
+                <button className="primary send" type="submit" disabled={!draft.trim() || !connected || busy} aria-label={viewing ? 'Send, continuing this chat' : 'Send'}
+                  title={viewing && busy ? 'Wait for the reply in your current chat to finish' : undefined}>
                   <IconSend size={18} aria-hidden />
                 </button>
               )}
           </form>
           <p className="sr-only" role="status">{listening ? 'Recording. Press the microphone again to stop.' : writing ? 'Writing down what you said.' : ''}</p>
-          <p className="composer-hint muted small">{listening ? `Recording ${clock(dictation.elapsed)} of up to 2 minutes · press the microphone to stop · Esc throws it away` : writing ? 'Writing down what you said' : busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a markdown file to attach it'}</p>
+          <p className="composer-hint muted small">{viewing && !listening && !writing ? 'Sending continues this chat · the one you were in stays in History' : listening ? `Recording ${clock(dictation.elapsed)} of up to 2 minutes · press the microphone to stop · Esc throws it away` : writing ? 'Writing down what you said' : busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a markdown file to attach it'}</p>
         </>
-      )}
       {error && <p className="error composer-error">{error}</p>}
-      {!viewing && dictation.error && <p className="error composer-error">{dictation.error}</p>}
+      {dictation.error && <p className="error composer-error">{dictation.error}</p>}
       {speech.error && <p className="error composer-error">{speech.error}</p>}
       {clearing && (
         <ConfirmDelete

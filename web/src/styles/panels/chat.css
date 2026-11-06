@@ -57,8 +57,6 @@
   .chat-tools-label { display: none; }
 }
 
-/* Viewing a past conversation: read-only footer */
-.viewing-footer { display: flex; justify-content: center; padding: 14px; }
 
 /* ---- history drawer overlay ----------------------------------------------------------------- */
 

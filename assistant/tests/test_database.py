@@ -212,7 +212,7 @@ def test_migrations_apply_once_in_order_and_a_failing_one_leaves_nothing_behind(
     assert first == ["001_a.sql", "002_b.sql"] and again == []
     assert c_exists is False  # the failed file was rolled back whole
     assert recorded == ["001_a.sql", "001_initial.sql", "002_b.sql", "002_files.sql", "003_file_texts.sql",
-                        "004_records.sql", "005_conversations.sql"]
+                        "004_records.sql", "005_conversations.sql", "006_conversation_messages.sql"]
 
 
 @needs_postgres
@@ -418,6 +418,13 @@ def test_conversations_are_kept_listed_newest_first_renamed_and_deleted_in_the_d
                 left = [(c["id"], c["title"]) for c in await store.list()]
                 with pytest.raises(Exception):
                     await store.save("not-an-id", "x", [], 0)  # the table takes only the ids it makes
+                # What the model remembers goes in and comes back; a conversation kept without it says so.
+                remembered = [{"role": "user", "content": "hi"},
+                              {"role": "assistant", "content": [{"type": "thinking", "thinking": "t", "signature": "s"}]}]
+                await store.save(b, "Renamed", [{"type": "user_message", "text": "yo"}], 1, remembered)
+                assert (await store.get(b))["messages"] == remembered
+                await store.save(b, "Renamed", [{"type": "user_message", "text": "yo"}], 1)
+                assert (await store.get(b))["messages"] is None
                 return listed, events, renamed, deleted, left
 
     listed, events, renamed, deleted, left = run(scenario())

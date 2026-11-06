@@ -515,11 +515,26 @@ before.
 Chat keeps each conversation in the `conversations` table: its id, a title (the first message, cut at a word,
 renamable), the events Chat showed (JSONB) and how many messages it holds. It is saved after every turn and when
 Chat is cleared; one with no message in it is not kept. With no database there is no history and nothing fails.
-The page lists them, opens one read-only (the model is not given it back), renames and deletes them.
+The page lists them, opens one, renames and deletes them, and **a past conversation can be continued** (the user's
+request, 2026-11-06): writing in one opened from History makes it the one Chat is in.
+
+- **Continuing gives the model back what it remembered** (`006_conversation_messages.sql`): each save keeps the API's
+  own messages (the words, the tools called and what they returned, the thinking with its signature, through the SDK's
+  `model_dump`), and `POST /api/conversations/{id}/continue` puts them back. The current conversation is kept first and
+  Chat emptied (as Clear chat does, so held notes go too), then every page is sent the chosen one's events again.
+  Refused mid-reply, audited (`assistant__continue_conversation`). Continuing the one Chat is in changes nothing.
+- **A conversation kept before 2026-11-06 has no messages** and is continued from its words: each question with its
+  reply, a question with no reply left out so the model's turns still alternate. What its tools returned is gone; the
+  model may need to look again.
+- **The page**: a past conversation shows the message box ("Write to continue this chat"); sending continues it, then
+  sends. Attaching and dropping files are off there (an upload's note would be dropped by the switch), and Stop is not
+  shown (it would stop the other conversation's reply).
 
 - **The conversation Chat is in is special.** Deleted, it leaves Chat too (as Clear chat does) and is refused
   while a message in it is being worked on: left open, its next turn saved it again, deleted messages and old title
   and all (found in Chrome). Renamed, the hub's own title changes too, or the next save put the old one back.
+- **A failed save is a warning, never an error** (`log` in server.py, which the first version named but never
+  had: a database hiccup at the end of a reply would have raised; found while building continuing, now tested).
 - **Deleting is audited** (`assistant__delete_conversation`, its title and size). Clearing saves first; deleting
   the current one clears without saving.
 - **The page treats the panel and an opened conversation as one layer** (`web/DESIGN.md` -> Back): Back closes the

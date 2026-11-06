@@ -22,6 +22,7 @@ import asyncio
 import base64
 import binascii
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -39,7 +40,8 @@ from pydantic import BaseModel
 
 from assistant.approval import WEB_PREVIEW_LIMIT, needs_approval, sanitise
 from assistant.audit import AuditStore
-from assistant.conversations import ConversationStore, NullConversationStore, title_from_message, _new_id
+from assistant.conversations import (ConversationStore, NullConversationStore, _new_id, messages_for_storage,
+                                     messages_from_events, title_from_message)
 from assistant.auth import (
     AuthError, MemorySessionStore, PgSessionStore, clear_cookie, exchange_code, fetch_userinfo,
     google_login_url, parse_allowed_emails, pkce_pair, set_cookie,
@@ -99,6 +101,8 @@ def approval_view(request: ApprovalRequest) -> dict[str, Any]:
         "preview_expected": request.preview_expected,
     }
 
+
+log = logging.getLogger("assistant.server")
 
 # The chat page's microphone (meet-ai's `dictate`). A clip is not an upload: it is never stored, listed or noted for
 # the model, and is deleted as soon as meet-ai has read it. Two minutes of the browser's Opus is about 1 MB; a WAV of
@@ -200,7 +204,8 @@ class Hub:
             return
         try:
             await self.conversations.save(
-                self.conversation_id, self.conversation_title, conv_events, message_count)
+                self.conversation_id, self.conversation_title, conv_events, message_count,
+                messages_for_storage(self.messages))
         except Exception:
             log.warning("could not save conversation %s", self.conversation_id, exc_info=True)
 
@@ -258,6 +263,24 @@ class Hub:
         # lives here and nowhere else.
         await self.emit({"type": "chat_cleared"})
         return cleared
+
+    async def continue_conversation(self, conversation_id: str) -> dict[str, Any] | None:
+        """Make a kept conversation the one Chat is in, so the next message carries on from it: the current one is
+        kept first and Chat emptied (as Clear chat does), then the model is given back what it remembered of the
+        chosen one and every open page is sent its events again. None when there is no such conversation. The
+        caller makes sure no turn is running."""
+        if conversation_id == self.conversation_id:
+            return {"id": conversation_id, "title": self.conversation_title, "restored": 0}  # already in it
+        kept = await self.conversations.get(conversation_id)
+        if kept is None:
+            return None
+        await self.clear_chat()
+        self.messages.extend(kept.get("messages") or messages_from_events(kept["events"]))
+        self.conversation_id = conversation_id
+        self.conversation_title = kept["title"]
+        for event in kept["events"]:
+            await self.emit({k: v for k, v in event.items() if k not in ("seq", "at")})
+        return {"id": conversation_id, "title": kept["title"], "restored": len(kept["events"])}
 
     def request_stop(self) -> bool:
         """Ask the running turn to stop at its next safe point (see `run_turn`). An approval waiting on
@@ -634,6 +657,20 @@ def create_app(
         if conversation_id == h.conversation_id:
             h.conversation_title = body.title.strip()  # or the next save would put the old title back
         return {"renamed": True}
+
+    @app.post("/api/conversations/{conversation_id}/continue")
+    async def continue_conversation(conversation_id: str) -> dict[str, Any]:
+        """Carry on a kept conversation. Refused while a message is being worked on, as Clear chat is: the turn is in
+        the middle of the conversation that would be put away. Audited, as Clear chat is."""
+        h = hub()
+        if h.busy or h.pending:
+            raise HTTPException(409, "still working on a message; continue another conversation when it has finished")
+        continued = await h.continue_conversation(conversation_id)
+        if continued is None:
+            raise HTTPException(404, "no such conversation")
+        await audit.record(tool="assistant__continue_conversation", arguments={"id": conversation_id}, outcome="ok",
+                           result=repr(continued["title"]), origin="button")
+        return continued
 
     @app.post("/api/approvals/{approval_id}")
     async def answer(approval_id: str, body: ApprovalAnswer) -> dict[str, Any]:

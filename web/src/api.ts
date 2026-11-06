@@ -329,6 +329,10 @@ export const renameConversation = (id: string, title: string) =>
     body: JSON.stringify({ title }),
   })
 
+/** Make a kept conversation the one Chat is in, so the next message carries on from it. The current one is kept. */
+export const continueConversation = (id: string) =>
+  request<{ id: string; title: string; restored: number }>(`/api/conversations/${encodeURIComponent(id)}/continue`, { method: 'POST' })
+
 export const getCurrentConversation = () =>
   request<{ id: string | null; title: string }>('/api/conversations/current')
 /** Stop the reply being worked on, at its next safe point: a tool already running finishes, nothing after it starts. */

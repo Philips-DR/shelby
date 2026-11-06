@@ -29,6 +29,40 @@ def _new_id() -> str:
     return uuid4().hex
 
 
+def _plain(block: Any) -> Any:
+    """One content block as JSON: the SDK's own objects (text, tool calls, thinking with its signature) as the
+    dicts the API takes back; anything already plain as it is."""
+    dump = getattr(block, "model_dump", None)
+    return dump(mode="json", exclude_none=True) if callable(dump) else block
+
+
+def messages_for_storage(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What the model remembers, as JSON, so continuing a conversation gives it back unchanged."""
+    return [{**m, "content": [_plain(b) for b in m["content"]]} if isinstance(m.get("content"), list) else dict(m)
+            for m in messages]
+
+
+def messages_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """For a conversation kept before its messages were: the words alone, each question with its reply. What tools
+    returned is not there, so the model may need to look again. A question that got no reply is left out, so the
+    next message never follows another user message."""
+    turns: list[dict[str, Any]] = []
+    for event in events:
+        text = str(event.get("text") or "")
+        if event.get("type") == "user_message":
+            if turns and turns[-1]["role"] == "user":
+                turns.pop()  # an earlier question with no reply
+            turns.append({"role": "user", "content": text})
+        elif event.get("type") == "assistant_text" and text and turns:
+            if turns[-1]["role"] == "assistant":
+                turns[-1]["content"] += "\n\n" + text
+            else:
+                turns.append({"role": "assistant", "content": text})
+    if turns and turns[-1]["role"] == "user":
+        turns.pop()
+    return turns
+
+
 class ConversationStore:
     """Postgres-backed conversation history."""
 
@@ -54,7 +88,7 @@ class ConversationStore:
 
     async def get(self, conversation_id: str) -> dict[str, Any] | None:
         row = await self._db.pool.fetchrow(
-            "SELECT id, title, events, message_count, created_at, updated_at "
+            "SELECT id, title, events, messages, message_count, created_at, updated_at "
             "FROM conversations WHERE id = $1",
             conversation_id,
         )
@@ -64,6 +98,7 @@ class ConversationStore:
             "id": row["id"],
             "title": row["title"],
             "events": json.loads(row["events"]),
+            "messages": json.loads(row["messages"]) if row["messages"] is not None else None,
             "message_count": row["message_count"],
             "created_at": row["created_at"].isoformat(),
             "updated_at": row["updated_at"].isoformat(),
@@ -75,16 +110,18 @@ class ConversationStore:
         title: str,
         events: list[dict[str, Any]],
         message_count: int,
+        messages: list[dict[str, Any]] | None = None,
     ) -> str:
         await self._db.pool.execute(
-            "INSERT INTO conversations (id, title, events, message_count) "
-            "VALUES ($1, $2, $3::jsonb, $4) "
+            "INSERT INTO conversations (id, title, events, message_count, messages) "
+            "VALUES ($1, $2, $3::jsonb, $4, $5::jsonb) "
             "ON CONFLICT (id) DO UPDATE SET title = $2, events = $3::jsonb, "
-            "message_count = $4, updated_at = clock_timestamp()",
+            "message_count = $4, messages = $5::jsonb, updated_at = clock_timestamp()",
             conversation_id,
             title,
             json.dumps(events, default=str),
             message_count,
+            json.dumps(messages, default=str) if messages is not None else None,
         )
         return conversation_id
 
@@ -112,7 +149,8 @@ class NullConversationStore:
     async def get(self, conversation_id: str) -> dict[str, Any] | None:
         return None
 
-    async def save(self, conversation_id: str, title: str, events: list[dict[str, Any]], message_count: int) -> str:
+    async def save(self, conversation_id: str, title: str, events: list[dict[str, Any]], message_count: int,
+                   messages: list[dict[str, Any]] | None = None) -> str:
         return conversation_id
 
     async def delete(self, conversation_id: str) -> bool:
