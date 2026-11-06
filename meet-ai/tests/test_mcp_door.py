@@ -56,7 +56,7 @@ def call(server, name, **arguments) -> dict:
 def test_the_door_advertises_exactly_its_operations(server):
     names = sorted(tool.name for tool in asyncio.run(server.list_tools()))
     assert names == [
-        "generate_minutes", "generate_notes", "list_audio_sources", "list_recordings",
+        "dictate", "generate_minutes", "generate_notes", "list_audio_sources", "list_recordings",
         "preview_minutes", "preview_notes", "read_transcript", "read_written", "recording_status",
         "start_recording", "start_transcription", "stop_recording", "transcribe",
         "transcription_status",
@@ -75,6 +75,7 @@ def test_the_operations_that_spend_nothing_are_marked_read_only(server):
     assert read_only["read_transcript"] is True
     assert read_only["read_written"] is True
     assert read_only["preview_minutes"] is True
+    assert read_only["dictate"] is True
     assert read_only["generate_notes"] is False
     assert read_only["generate_minutes"] is False
     assert read_only["transcribe"] is False

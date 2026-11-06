@@ -2,7 +2,7 @@
 // to what each was asked and what came back; what you did on other pages folds into one line too; an approval
 // waiting on you is impossible to miss; a reply can be stopped; and a page with no conversation offers things to ask.
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AUDIO_EXTS, clearChat, getConversation, isAudio, isMarkdown, sendChat, splitDocs, stopChat, uploadAudio, uploadDocs, type AssistantEvent } from '../api'
@@ -10,9 +10,12 @@ import { useAppState } from '../state'
 import { BrandMark } from '../ui/Shell'
 import { DropZone } from '../ui/DropZone'
 import { useLayer } from '../ui/useLayer'
-import { IconAttach, IconCheck, IconChevron, IconCopy, IconPanelOpen, IconSend, IconSpark, IconStop, IconTrash } from '../ui/icons'
+import { IconAttach, IconCheck, IconChevron, IconClose, IconCopy, IconMic, IconPanelOpen, IconSend, IconSpark, IconStop, IconTrash } from '../ui/icons'
 import { ConfirmDelete } from '../ui/ConfirmDelete'
 import { PickFiles, UploadProgress } from './Upload'
+import { canRecordInBrowser } from '../useBrowserRecorder'
+import { useDictation } from '../useDictation'
+import { clock, withDictated } from './dictationText'
 import { ChatHistory } from './ChatHistory'
 import { ApprovalCard } from './ApprovalCard'
 import { StepGroup } from './StepDetails'
@@ -22,6 +25,10 @@ import '../styles/panels/chat.css'
 // What sits over Chat or takes its place, kept in the history (useLayer.ts): the history panel, or a past
 // conversation by its id. Back closes the panel, and from a past conversation returns to the current one.
 type ChatLayer = { panel?: 'history'; viewing?: string } | null
+
+// The microphone needs a secure page (https, or localhost) and a browser that records; without one there is no
+// button rather than one that fails.
+const HAS_MIC = canRecordInBrowser()
 
 const CONVERSATION = new Set(['user_message', 'assistant_text', 'approval_needed', 'turn_error', 'turn_stopped'])
 
@@ -88,6 +95,30 @@ export function Chat() {
   const scroller = useRef<HTMLDivElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
+  // Dictation: the words land in the message box, to be read and sent by hand, never sent by themselves.
+  const dictation = useDictation((said) => {
+    setDraft((d) => withDictated(d, said))
+    // With a mouse, the box takes focus, ready to edit. On a touch screen it does not: focus would open the
+    // on-screen keyboard over half the page, when the next thing is often just Send.
+    if (window.matchMedia('(pointer: coarse)').matches) return
+    requestAnimationFrame(() => {
+      const box = field.current
+      if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length) }
+    })
+  })
+  // A press on a microphone button keeps focus where it was. On a phone, focus anywhere in the chat box hides the tab
+  // bar (chat.css), which moved the box 64px between press and release, so the release missed the button and nothing
+  // happened (found in Chrome as a phone). The keyboard still reaches them with Tab.
+  const keepFocus = (e: MouseEvent) => e.preventDefault()
+  const listening = dictation.state === 'recording'
+  const writing = dictation.state === 'transcribing'
+  const { cancel: cancelDictation } = dictation
+  useEffect(() => {
+    if (!listening) return
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') cancelDictation() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [listening, cancelDictation])
 
   // An attachment is an upload like any other: the server tells the model about it with the
   // next message, so "transcribe this" or "make this a Doc" needs no path typed out.
@@ -343,8 +374,8 @@ export function Chat() {
         </div>
       ) : (
         <>
-          <form className="composer" onSubmit={(e) => void submit(e)}>
-            <PickFiles
+          <form className={`composer${listening ? ' listening' : ''}`} onSubmit={(e) => void submit(e)}>
+            {!listening && <PickFiles
               label=""
               ariaLabel="Attach a recording or a markdown file"
               icon={<IconAttach size={18} aria-hidden />}
@@ -353,17 +384,35 @@ export function Chat() {
               disabled={!connected || uploading !== null}
               onPick={(files) => void attach(files)}
               className="ghost attach"
-            />
+            />}
             <textarea
               ref={field}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKey}
-              placeholder={!connected ? 'Reconnecting…' : busy ? 'Working…' : 'Message the assistant'}
+              placeholder={!connected ? 'Reconnecting…' : listening ? 'Listening…' : writing ? 'Writing down what you said…' : busy ? 'Working…' : 'Message the assistant'}
               disabled={!connected}
               rows={1}
               aria-label="Message"
             />
+            {HAS_MIC && (listening
+              ? (
+                <>
+                  <span className="dictation-time" aria-hidden>{clock(dictation.elapsed)}</span>
+                  <button className="ghost mic-cancel" type="button" onMouseDown={keepFocus} onClick={dictation.cancel} aria-label="Throw the recording away" title="Throw it away (Esc)">
+                    <IconClose size={16} aria-hidden />
+                  </button>
+                  <button className="mic listening" type="button" onMouseDown={keepFocus} onClick={dictation.finish} aria-label="Stop and write down what you said" aria-pressed="true" title="Stop and write it down">
+                    <IconMic size={18} aria-hidden />
+                  </button>
+                </>
+              )
+              : (
+                <button className="ghost mic" type="button" onMouseDown={keepFocus} onClick={dictation.start} disabled={!connected || writing || dictation.state === 'starting'}
+                  aria-label={writing ? 'Writing down what you said' : 'Dictate a message'} aria-pressed="false" title="Dictate">
+                  {writing ? <span className="mic-spinner" aria-hidden /> : <IconMic size={18} aria-hidden />}
+                </button>
+              ))}
             {busy
               ? (
                 <button className="send stop" type="button" onClick={() => void stop()} disabled={stopping} aria-label={stopping ? 'Stopping the reply' : 'Stop the reply'} title="Stop">
@@ -376,10 +425,12 @@ export function Chat() {
                 </button>
               )}
           </form>
-          <p className="composer-hint muted small">{busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a markdown file to attach it'}</p>
+          <p className="sr-only" role="status">{listening ? 'Recording. Press the microphone again to stop.' : writing ? 'Writing down what you said.' : ''}</p>
+          <p className="composer-hint muted small">{listening ? `Recording ${clock(dictation.elapsed)} of up to 2 minutes · press the microphone to stop · Esc throws it away` : writing ? 'Writing down what you said' : busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a markdown file to attach it'}</p>
         </>
       )}
       {error && <p className="error composer-error">{error}</p>}
+      {!viewing && dictation.error && <p className="error composer-error">{dictation.error}</p>}
       {clearing && (
         <ConfirmDelete
           title="Clear this conversation?"

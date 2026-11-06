@@ -120,6 +120,9 @@ class RemoteTool:
     # What the tool calls itself for a person ("Write a new draft"), for the interface; the model is
     # shown the name and description only.
     title: str = ""
+    # Declared by the tool in `_meta` ("interface_only"): a page's own plumbing, such as the chat page's microphone.
+    # The model is never shown it and cannot call it; every tool it is shown costs it context on every turn.
+    interface_only: bool = False
 
     def as_anthropic_tool(self) -> dict[str, Any]:
         return {
@@ -223,6 +226,7 @@ class ToolRegistry:
                     read_only=bool(annotations and annotations.read_only_hint),
                     preview=ApprovalPreview.parse(tool.meta),
                     title=tool.title or (annotations.title if annotations and annotations.title else "") or "",
+                    interface_only=bool(isinstance(tool.meta, dict) and tool.meta.get("interface_only")),
                 )
             )
         return out
@@ -231,7 +235,7 @@ class ToolRegistry:
         return next((t for t in self.tools if t.qualified_name == qualified_name), None)
 
     def anthropic_tools(self) -> list[dict[str, Any]]:
-        return [tool.as_anthropic_tool() for tool in self.tools]
+        return [tool.as_anthropic_tool() for tool in self.tools if not tool.interface_only]
 
     async def preview_of(self, tool: RemoteTool, arguments: dict[str, Any]) -> str | None:
         """Render what this call would do, by asking the tool the tool named.

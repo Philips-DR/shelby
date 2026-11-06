@@ -20,6 +20,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from meetnotes.client import ModelConfig, resolve_provider
+from meetnotes.dictation import DICTATION_MAX_SECONDS, Dictation
 from meetnotes.operations import (
     MAX_SYNC_AUDIO_SECONDS,
     OperationError,
@@ -55,8 +56,10 @@ def _failed(error: Exception) -> dict:
     return {"error": str(error)}
 
 
-def create_meet_ai_server(paths: ServerPaths, config: ModelConfig) -> MCPServer:
+def create_meet_ai_server(paths: ServerPaths, config: ModelConfig, dictation: Dictation | None = None) -> MCPServer:
     server = MCPServer(name="meet-ai", version=VERSION)
+    # One per server process: its model stays loaded between clips (dictation.py).
+    dictation = dictation or Dictation()
 
     def locate(name: str) -> Path:
         """A transcript as a caller names it: a full path, or just "20260812_102457" --
@@ -225,6 +228,25 @@ def create_meet_ai_server(paths: ServerPaths, config: ModelConfig) -> MCPServer:
                     lexicon_path=Path(lexicon) if lexicon else None, effort=effort,
                 )
             )
+        except (OperationError, OSError, ValueError) as error:
+            return _failed(error)
+
+    @server.tool(
+        name="dictate",
+        title="Turn a short spoken clip into text",
+        description=(
+            "Speech to text for the chat page's microphone: one clip of up to "
+            f"{DICTATION_MAX_SECONDS // 60} minutes in, its words out, in English. Runs on this machine, "
+            "keeps a small model loaded between clips, and writes nothing. For a meeting, use transcribe "
+            "or start_transcription."
+        ),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+        # For the page only: the model has no microphone, and every tool it is shown costs it context.
+        meta={"interface_only": True},
+    )
+    def _dictate(audio: str) -> dict:
+        try:
+            return as_dict(dictation.transcribe(Path(audio)))
         except (OperationError, OSError, ValueError) as error:
             return _failed(error)
 

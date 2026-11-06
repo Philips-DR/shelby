@@ -526,6 +526,21 @@ The page lists them, opens one read-only (the model is not given it back), renam
   panel, and from a past conversation returns to the current one. The history keeps only the id, so Forward or a
   reload fetches it again.
 
+## Dictation, and tools for the page only (`PUT /api/dictate`, 2026-11-06)
+
+The chat box's microphone records in the browser and sends the clip here; meet-ai's `dictate` turns it into words,
+which go into the message box to be read and sent by hand. Never sent by themselves.
+
+- **A clip is not an upload.** It goes to a temporary folder, is handed to meet-ai by path, and the folder is deleted
+  whatever happens. Nothing is stored, listed, or noted for the model. It is a read from the page, so it is neither
+  audited nor shown as a step (`session.execute`). 25 MB at most; refusals are `{"error"}`, which the page's upload
+  helper reads.
+- **`interface_only`**: a tool may say in its `_meta` that it is the page's own plumbing. `anthropic_tools()` leaves
+  it out, and a model that names one anyway gets "no such tool" without anything running. Every tool the model is
+  shown costs it context on every turn, and the model has no microphone.
+- **The containers' model cache does not yet hold base.en** (`data/cache/huggingface`, checked 2026-11-06). The first
+  clip after deploying downloads it (about 140 MB) and is slow once.
+
 ## Approval previews
 
 - **A tool may declare, in `_meta`, the read-only tool that renders its effect.** The gate

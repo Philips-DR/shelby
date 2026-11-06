@@ -203,3 +203,21 @@
   outline: none;
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
+
+/* ---- dictation: the composer's microphone ---------------------------------------------------- */
+
+.composer .mic, .composer .mic-cancel { width: 44px; height: 44px; padding: 0; border-radius: 50%; }
+.composer .mic { color: var(--ink-3); }
+/* Not while recording: the pointer is still over the button after the press, and hover would pale it. */
+.composer .mic:not(.listening):hover:not(:disabled) { color: var(--brand); background: var(--brand-soft); }
+/* Recording is said with a word and a clock (the hint, the time); the ring only draws the eye. Not a status colour:
+   recording is neither good nor bad (DESIGN.md, rule 3). */
+.composer .mic.listening { color: var(--surface); background: var(--brand); border: 0; animation: mic-listening calc(var(--dur-3) * 4) var(--ease) infinite; }
+.composer .mic-cancel { color: var(--ink-3); }
+.dictation-time { flex: none; display: flex; align-items: center; height: 44px; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.mic-spinner { width: 16px; height: 16px; border: 2px solid var(--line-strong); border-top-color: var(--brand); border-radius: 50%; animation: spin calc(var(--dur-3) * 2) linear infinite; }
+@keyframes mic-listening {
+  0% { box-shadow: 0 0 0 0 var(--brand-line); }
+  70% { box-shadow: 0 0 0 10px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}

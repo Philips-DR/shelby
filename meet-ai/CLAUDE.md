@@ -226,6 +226,24 @@ for every real meeting.
   argument, a missing dependency — rather than hand back an id for a job already dead.
 - Every job pays ~15–20 s to load the model before any audio is decoded. Fixed cost, not progress.
 
+## Dictation: the chat page's microphone (`meetnotes/dictation.py`, 2026-11-06)
+
+`dictate(audio)` turns a clip of up to two minutes into its words, in English, and writes nothing; the backend
+deletes the clip. It is marked `interface_only` in its `_meta`, so the assistant never shows it to the model.
+
+- **Not the meeting model.** Measured on this machine (a 10 s clip of real speech, `int8_float32`, model loaded):
+  distil-large-v3 18-20 s, because Whisper pads every clip to a 30-second window, so a short clip costs what a long
+  one does; small 3.8-4.3 s and 1.2 GB; **base.en 1.4-1.6 s and 630 MB**, the default. `MEET_AI_DICTATION_MODEL` names
+  another. An 8 s clip came back word for word in 1.4-1.6 s from pressing stop, through the real page and backend;
+  sent to the backend directly, the first clip took 3.9 s (the model loading) and the next 2.0 s.
+- **Kept loaded between clips, let go after ten idle minutes** (`idle_seconds`), so its memory goes back to a laptop
+  with little to spare. One server process, one model; a lock keeps two clips from sharing it at once.
+- **Decoded here, measured on the samples.** A browser's MediaRecorder writes WebM with no duration in its header, so
+  the two-minute cap is checked after decoding, before any model is loaded.
+- **English only, on purpose**: base.en is English-only, and given another language it writes fluent nonsense.
+- **Not yet tried on the user's own voice.** The plan was to choose between base.en and small on five real prompts.
+- A transcription job pins every core; a clip dictated while one runs will be slower. Not measured.
+
 ## Diarization — what it is honestly worth
 
 **Serviceable, not reliable.** Who-said-what is inferred from voice similarity, and a single room

@@ -20,14 +20,14 @@ export interface BrowserRecorder {
   uploadProgress: number
 }
 
-const preferredMime = (): string => {
+export const preferredMime = (): string => {
   for (const mime of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']) {
     if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime)) return mime
   }
   return ''
 }
 
-const extFor = (mime: string): string => {
+export const extFor = (mime: string): string => {
   if (mime.startsWith('audio/webm')) return '.webm'
   if (mime.startsWith('audio/ogg')) return '.ogg'
   if (mime.startsWith('audio/mp4')) return '.m4a'

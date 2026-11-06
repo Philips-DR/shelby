@@ -29,6 +29,7 @@ export {
   Mail as IconMail,
   MessageSquare as IconChat,
   Mic as IconMeetings,
+  Mic as IconMic,
   Monitor as IconSystem,
   Moon as IconMoon,
   Paperclip as IconAttach,

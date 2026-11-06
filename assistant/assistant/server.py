@@ -22,6 +22,8 @@ import asyncio
 import json
 import os
 import secrets
+import shutil
+import tempfile
 import time
 from collections import deque
 from contextlib import asynccontextmanager
@@ -94,6 +96,13 @@ def approval_view(request: ApprovalRequest) -> dict[str, Any]:
         "preview": sanitise(request.preview, WEB_PREVIEW_LIMIT) if request.preview else None,
         "preview_expected": request.preview_expected,
     }
+
+
+# The chat page's microphone (meet-ai's `dictate`). A clip is not an upload: it is never stored, listed or noted for
+# the model, and is deleted as soon as meet-ai has read it. Two minutes of the browser's Opus is about 1 MB; a WAV of
+# the same is about 23 MB.
+DICTATION_TOOL = "meet_ai__dictate"
+MAX_DICTATION_BYTES = 25 * 1024**2
 
 
 def parsed(output: str) -> Any:
@@ -743,6 +752,34 @@ def create_app(
         h.note_text(f"The user uploaded audio {target.name} ({record.bytes} bytes), saved at {target}.")
         await h.emit({"type": "upload", "kind": "audio", "id": record.id, "name": target.name, "path": str(target)})
         return {"id": record.id, "name": target.name, "path": str(target), "bytes": record.bytes}
+
+    @app.put("/api/dictate")
+    async def dictate(request: Request, name: str = "clip.webm") -> Any:
+        """A spoken clip in, its words out, for the message box. A read from the page, so not audited and not shown
+        as a step (session.execute); refusals are {"error"}, which is what the page's upload helper reads."""
+        h = hub()
+        tool = h.registry.find(DICTATION_TOOL)
+        if tool is None:
+            return JSONResponse({"error": "Dictation needs meet-ai, which is not running."}, status_code=503)
+        suffix = Path(name).suffix.lower()
+        if suffix not in up.AUDIO_EXTS:
+            return JSONResponse({"error": f"{name} is not an audio file"}, status_code=400)
+        folder = Path(tempfile.mkdtemp(prefix="dictation-"))
+        try:
+            clip = folder / f"clip{suffix}"
+            try:
+                await up.receive(clip, request.stream(), MAX_DICTATION_BYTES)
+            except up.UploadError as error:
+                return refuse(error)
+            output, outcome = await execute(h.registry, tool, {"audio": str(clip)}, h.audit,
+                                            allow_gate, h.emit, origin="button")
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        result = parsed(output)
+        if outcome != "ok" or not isinstance(result, dict) or result.get("error"):
+            message = result.get("error") if isinstance(result, dict) else output
+            return JSONResponse({"error": message or "Dictation failed."}, status_code=422)
+        return result
 
     @app.put("/api/uploads/book")
     async def upload_book(request: Request, name: str):

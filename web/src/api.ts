@@ -476,6 +476,18 @@ export const uploadAudio = (file: File, onProgress?: (fraction: number) => void)
   put<UploadedAudio>(`/api/uploads/audio?name=${encodeURIComponent(file.name)}`, file,
     (sent) => onProgress?.(file.size ? sent / file.size : 1))
 
+export interface Dictated {
+  text: string
+  seconds: number
+  model: string
+  /** This clip waited for the model to load. */
+  loaded_now: boolean
+}
+
+/** A spoken clip for the message box: its words come back, and nothing is kept (meet-ai's dictate). */
+export const dictate = (clip: Blob, name: string) =>
+  put<Dictated>(`/api/dictate?name=${encodeURIComponent(name)}`, clip)
+
 /** A PDF to make into an audiobook. */
 export const uploadBook = (file: File, onProgress?: (fraction: number) => void) =>
   put<UploadedAudio>(`/api/uploads/book?name=${encodeURIComponent(file.name)}`, file,

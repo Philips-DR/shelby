@@ -276,7 +276,7 @@ async def run_turn(
                 continue
 
             tool = registry.find(block.name)
-            if tool is None:
+            if tool is None or tool.interface_only:  # never shown to the model, so a guess at one is refused
                 results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
