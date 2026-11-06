@@ -530,6 +530,30 @@ export const getKept = (tool: string) => request<{ records: Kept[] }>(`/api/reco
 export const deleteKept = (ids: string[]) =>
   request<{ deleted: number; bytes: number }>('/api/records/delete', { method: 'POST', body: JSON.stringify({ ids }) })
 
+/** A sentence or two of a reply, spoken by audiobook's speak (/api/speak): MP3 back. Aborting stops the request. */
+export async function speakText(text: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await fetch(`${API_URL}/api/speak`, {
+    method: 'POST',
+    credentials: 'include',
+    signal,
+    headers: { 'content-type': 'application/json', ...NGROK_HEADER, ...(token ? { 'x-assistant-token': token } : {}) },
+    body: JSON.stringify({ text }),
+  })
+  if (response.status === 401 && !(await recoverToken())) {
+    window.dispatchEvent(new Event('assistant-needs-token'))
+  }
+  if (!response.ok) {
+    let detail = response.statusText
+    try {
+      detail = ((await response.json()) as { error?: string }).error ?? detail
+    } catch {
+      // not JSON; keep the status text
+    }
+    throw new ApiError(response.status, detail)
+  }
+  return response.blob()
+}
+
 async function fetchBlob(path: string): Promise<Blob> {
   const response = await fetch(`${API_URL}${path}`, {
     credentials: 'include',

@@ -30,6 +30,7 @@ export {
   MessageSquare as IconChat,
   Mic as IconMeetings,
   Mic as IconMic,
+  Volume2 as IconSpeak,
   Monitor as IconSystem,
   Moon as IconMoon,
   Paperclip as IconAttach,

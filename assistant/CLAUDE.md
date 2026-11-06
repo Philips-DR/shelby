@@ -526,7 +526,7 @@ The page lists them, opens one read-only (the model is not given it back), renam
   panel, and from a past conversation returns to the current one. The history keeps only the id, so Forward or a
   reload fetches it again.
 
-## Dictation, and tools for the page only (`PUT /api/dictate`, 2026-11-06)
+## Dictation, spoken replies, and tools for the page only (`PUT /api/dictate`, `POST /api/speak`, 2026-11-06)
 
 The chat box's microphone records in the browser and sends the clip here; meet-ai's `dictate` turns it into words,
 which go into the message box to be read and sent by hand. Never sent by themselves.
@@ -538,6 +538,11 @@ which go into the message box to be read and sent by hand. Never sent by themsel
 - **`interface_only`**: a tool may say in its `_meta` that it is the page's own plumbing. `anthropic_tools()` leaves
   it out, and a model that names one anyway gets "no such tool" without anything running. Every tool the model is
   shown costs it context on every turn, and the model has no microphone.
+- **`POST /api/speak {text, voice?}`** sends a sentence or two to audiobook's `speak` and returns the MP3 bytes
+  (`no-store`). The same rules: a page read, not audited or shown; nothing kept; refusals are `{"error"}`. The page
+  turns a reply's markdown into sentences (`web/src/components/speechText.ts`: code and tables are said to be on
+  screen, never read), asks for one while the one before plays, and pauses an audiobook that is playing. "Speak
+  replies" reads only replies that arrive after it is turned on; dictating or sending stops a reading.
 - **The containers' model cache does not yet hold base.en** (`data/cache/huggingface`, checked 2026-11-06). The first
   clip after deploying downloads it (about 140 MB) and is slow once.
 

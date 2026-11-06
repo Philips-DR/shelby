@@ -150,6 +150,28 @@ silence, then the title, then the usual `TITLE_PAUSE`. A chapter with no label (
 - `chapter_texts` (what the progress count and the estimate are built from) uses the same pieces, so the count is exactly what the
   voice is asked for; a test says so.
 
+## Speaking a chat reply (`speaking.py`, the `speak` tool, 2026-11-06)
+
+The suite's chat reads replies aloud through `speak(text, voice)`: up to 600 characters in (the page sends a sentence
+at a time), an MP3 back as base64, nothing written. It is marked `interface_only` in its `_meta`, so the assistant
+never shows it to the model, and it is read-only.
+
+- **Its own model, kept loaded, 8-bit on the processor** (`tts.load_speaking_model`, so Pocket TTS is still imported
+  only by the speak stage). Measured on this laptop with abigail: 2.0x real time against the full model's 1.38x, a
+  short opening phrase ready in 0.8 s against 1.35 s, every word right in Whisper's read-back (7 of 7 runs), and
+  likeness 0.953 against 0.957 (two recordings of a real person score 0.99). More threads gave nothing (Pocket TTS
+  pins itself to one, and 2 or 4 measured the same); Kyutai's optional torchao made it six times slower here. On an
+  NVIDIA card it is the full model. Let go after ten idle minutes; about 0.85-1 GB while loaded.
+- **Through the real backend:** the first call took 9.8 s (the libraries and the model loading), then 1.3-2.0 s per
+  sentence for 2.4-4.8 s of audio, so each sentence is ready before the one before it has finished playing. Whisper
+  read all five back word for word.
+- **The same text rules as a book** (`speech.for_speech`), so a number or a run of capitals reads as it does in a
+  render. A text with nothing to say, over the limit, or naming a voice that does not exist is refused before any
+  model loads. The default voice is abigail where it exists, else the preset alba.
+- **Not for books, and renders are unchanged**: they still load the full model in their own process. Whether renders
+  should also use 8-bit (and two at once) is step 4 of the user's voice plan (`../plan.md`, Next steps).
+- **Not listened to by ear** by whoever built it; the user's ear is the last check.
+
 ## Code layout
 
 - `audiobook/extract.py` — Docling conversion, cached in `.cache/docling/<pdf sha256>.json`; PDFs
@@ -168,7 +190,8 @@ silence, then the title, then the usual `TITLE_PAUSE`. A chapter with no label (
   top: `book_overview`, `chapter_text`, corrections, `list_audiobooks`, `start_*`, `job_status`. What
   both front doors call.
 - `audiobook/background.py` — analysing, rendering and voice work as detached background jobs.
-- `audiobook/mcp_server.py` — the MCP door (14 tools); `./mcp` launches it.
+- `audiobook/mcp_server.py` — the MCP door (17 tools); `./mcp` launches it.
+- `audiobook/speaking.py` — `Speaker`: a chat reply spoken while someone waits (the `speak` tool; see below).
 - `audiobook/voices.py` — `add_voice` (window search scored by WavLM similarity), `test_voice`,
   `list_voices`; metadata in `voices/NAME.json`.
 - `audiobook/__main__.py` — CLI and `.env` loading.

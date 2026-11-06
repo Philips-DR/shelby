@@ -10,11 +10,18 @@
 .avatar { flex: none; margin-top: 2px; border-radius: 8px; }
 .avatar.working svg { animation: spin 2.4s linear infinite; }
 .assistant-msg .bubble { position: relative; max-width: min(100%, 680px); padding-right: 40px; animation: none; }
+.assistant-msg .bubble:has(.read-aloud) { padding-right: 70px; } /* room for Read aloud beside Copy */
 .bubble.user { max-width: min(86%, 560px); }
 
 .copy { position: absolute; top: 6px; right: 6px; width: 28px; min-height: 28px; padding: 0; color: var(--ink-3); opacity: 0; transition: opacity var(--dur-1); }
 .bubble:hover .copy, .copy:focus-visible { opacity: 1; }
 @media (hover: none) { .copy { opacity: 0.55; } }
+/* Beside Copy. Shown while its reply is being read, so the way to stop it is always in view. */
+.read-aloud { position: absolute; top: 6px; right: 36px; width: 28px; min-height: 28px; padding: 0; color: var(--ink-3); opacity: 0; transition: opacity var(--dur-1); }
+.bubble:hover .read-aloud, .read-aloud:focus-visible, .read-aloud.reading { opacity: 1; }
+.read-aloud.reading { color: var(--brand); background: var(--brand-soft); }
+@media (hover: none) { .read-aloud { opacity: 0.55; } }
+.speak-replies.on { color: var(--brand); background: var(--brand-soft); }
 
 .chat-stopped { align-self: flex-start; margin: 0 0 0 36px; }
 .composer .send.stop { color: var(--ink); background: var(--bg-2); border: 1px solid var(--line-strong); }

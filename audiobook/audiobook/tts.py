@@ -63,6 +63,18 @@ def load_model():
     return model
 
 
+def load_speaking_model():
+    """Pocket TTS for speaking a chat reply while someone waits (speaking.py), kept apart from `load_model`'s.
+    On the processor it is the 8-bit model, measured 2.0x real time against 1.38x on this laptop; on a card it
+    is the full model, since dynamic 8-bit is a processor technique."""
+    import torch
+    from pocket_tts import TTSModel
+
+    model = TTSModel.load_model(quantize=not torch.cuda.is_available())
+    place(model, torch)
+    return model
+
+
 def to_array(audio) -> np.ndarray:
     """Pocket TTS returns audio on the model's device; numpy reads it only from the processor's memory."""
     return audio.cpu().numpy()

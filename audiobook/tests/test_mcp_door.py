@@ -9,7 +9,7 @@ import pytest
 from audiobook.mcp_server import ServerPaths, create_audiobook_server
 
 READ_ONLY = {"describe_audiobook", "get_corrections", "inventory", "job_status", "list_audiobooks", "list_voices",
-             "preview_book", "read_chapter"}
+             "preview_book", "read_chapter", "speak"}
 # `release` deletes, so it is a write: asked about in chat like delete_audiobook (the suite calls it itself).
 WRITES = {"cancel_job", "delete_audiobook", "release", "set_corrections", "start_analysis", "start_render",
           "start_voice_clone", "start_voice_sample"}

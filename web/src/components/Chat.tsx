@@ -10,11 +10,12 @@ import { useAppState } from '../state'
 import { BrandMark } from '../ui/Shell'
 import { DropZone } from '../ui/DropZone'
 import { useLayer } from '../ui/useLayer'
-import { IconAttach, IconCheck, IconChevron, IconClose, IconCopy, IconMic, IconPanelOpen, IconSend, IconSpark, IconStop, IconTrash } from '../ui/icons'
+import { IconAttach, IconCheck, IconChevron, IconClose, IconCopy, IconMic, IconPanelOpen, IconSend, IconSpark, IconSpeak, IconStop, IconTrash } from '../ui/icons'
 import { ConfirmDelete } from '../ui/ConfirmDelete'
 import { PickFiles, UploadProgress } from './Upload'
 import { canRecordInBrowser } from '../useBrowserRecorder'
 import { useDictation } from '../useDictation'
+import { useSpeech } from '../useSpeech'
 import { clock, withDictated } from './dictationText'
 import { ChatHistory } from './ChatHistory'
 import { ApprovalCard } from './ApprovalCard'
@@ -29,6 +30,13 @@ type ChatLayer = { panel?: 'history'; viewing?: string } | null
 // The microphone needs a secure page (https, or localhost) and a browser that records; without one there is no
 // button rather than one that fails.
 const HAS_MIC = canRecordInBrowser()
+// The two speech tools, page-only (their _meta): the controls show only when the tool is there to answer.
+const DICTATE = 'meet_ai__dictate'
+const SPEAK = 'audiobook__speak'
+const SPEAK_REPLIES_KEY = 'assistant-speak-replies'
+const storedSpeakReplies = (): boolean => {
+  try { return localStorage.getItem(SPEAK_REPLIES_KEY) === '1' } catch { return false }
+}
 
 const CONVERSATION = new Set(['user_message', 'assistant_text', 'approval_needed', 'turn_error', 'turn_stopped'])
 
@@ -38,6 +46,21 @@ const SUGGESTIONS = [
   'Write up my latest meeting as a Google Doc',
   'Turn my newest PDF into an audiobook',
 ]
+
+/** Read one reply aloud, or stop it while it is being read. */
+function ReadAloud({ reading, starting, onRead, onStop }: { reading: boolean; starting: boolean; onRead: () => void; onStop: () => void }) {
+  return (
+    <button
+      className={`ghost read-aloud${reading ? ' reading' : ''}`}
+      aria-label={reading ? (starting ? 'Getting ready to read this reply; press to stop' : 'Stop reading this reply') : 'Read this reply aloud'}
+      aria-pressed={reading}
+      title={reading ? 'Stop reading' : 'Read aloud'}
+      onClick={reading ? onStop : onRead}
+    >
+      {reading ? (starting ? <span className="mic-spinner" aria-hidden /> : <IconStop size={12} aria-hidden />) : <IconSpeak size={14} aria-hidden />}
+    </button>
+  )
+}
 
 function Copy({ text }: { text: string }) {
   const [done, setDone] = useState(false)
@@ -59,7 +82,9 @@ function Copy({ text }: { text: string }) {
 }
 
 export function Chat() {
-  const { events, pending, busy, connected, titles } = useAppState()
+  const { events, pending, busy, connected, titles, tools } = useAppState()
+  const canDictate = HAS_MIC && tools.has(DICTATE)
+  const canSpeak = tools.has(SPEAK)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
   const [attached, setAttached] = useState<string[]>([])
@@ -110,6 +135,24 @@ export function Chat() {
   // bar (chat.css), which moved the box 64px between press and release, so the release missed the button and nothing
   // happened (found in Chrome as a phone). The keyboard still reaches them with Tab.
   const keepFocus = (e: MouseEvent) => e.preventDefault()
+  const speech = useSpeech()
+  // "Speak replies": each reply that arrives after it is turned on is read in turn, never the ones already there.
+  const [speakReplies, setSpeakReplies] = useState(storedSpeakReplies)
+  const latestSeq = Math.max(0, ...events.map((e) => e.seq))
+  const spokenUpTo = useRef(latestSeq)
+  const toggleSpeakReplies = () => {
+    const on = !speakReplies
+    setSpeakReplies(on)
+    try { localStorage.setItem(SPEAK_REPLIES_KEY, on ? '1' : '0') } catch { /* this browser keeps nothing; the switch still works */ }
+    if (on) { spokenUpTo.current = latestSeq; speech.unlock() } else speech.stop()
+  }
+  useEffect(() => {
+    if (!speakReplies || !canSpeak) { spokenUpTo.current = latestSeq; return }
+    for (const e of events) {
+      if (e.seq > spokenUpTo.current && e.type === 'assistant_text' && e.text) speech.queue(`a${e.seq}`, e.text)
+    }
+    spokenUpTo.current = latestSeq
+  }, [events, latestSeq, speakReplies, canSpeak, speech.queue])
   const listening = dictation.state === 'recording'
   const writing = dictation.state === 'transcribing'
   const { cancel: cancelDictation } = dictation
@@ -166,6 +209,7 @@ export function Chat() {
     const message = draft.trim()
     if (!message || busy) return
     setError('')
+    speech.stop() // a new message: the old reply stops being read
     try {
       await sendChat(message)
       setDraft('')
@@ -254,6 +298,14 @@ export function Chat() {
             <span className="avatar" aria-hidden><BrandMark size={26} /></span>
             <div className="bubble assistant">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{event.text ?? ''}</ReactMarkdown>
+              {canSpeak && (
+                <ReadAloud
+                  reading={speech.reading === `a${event.seq}`}
+                  starting={speech.starting}
+                  onRead={() => speech.read(`a${event.seq}`, event.text ?? '')}
+                  onStop={speech.stop}
+                />
+              )}
               <Copy text={event.text ?? ''} />
             </div>
           </div>,
@@ -304,6 +356,12 @@ export function Chat() {
         </button>
         {viewing && (
           <span className="chat-viewing-title">{viewing.title || 'Untitled'}</span>
+        )}
+        {canSpeak && (
+          <button className={`ghost speak-replies${speakReplies ? ' on' : ''}`} onClick={toggleSpeakReplies} aria-pressed={speakReplies} aria-label="Speak replies"
+            title={speakReplies ? 'Replies are read aloud as they arrive' : 'Read replies aloud as they arrive'}>
+            <IconSpeak size={15} aria-hidden /><span className="chat-tools-label">Speak replies</span>
+          </button>
         )}
         <span className="chat-tools-spacer" />
         {viewing ? (
@@ -395,7 +453,7 @@ export function Chat() {
               rows={1}
               aria-label="Message"
             />
-            {HAS_MIC && (listening
+            {canDictate && (listening
               ? (
                 <>
                   <span className="dictation-time" aria-hidden>{clock(dictation.elapsed)}</span>
@@ -408,7 +466,7 @@ export function Chat() {
                 </>
               )
               : (
-                <button className="ghost mic" type="button" onMouseDown={keepFocus} onClick={dictation.start} disabled={!connected || writing || dictation.state === 'starting'}
+                <button className="ghost mic" type="button" onMouseDown={keepFocus} onClick={() => { speech.stop(); dictation.start() }} disabled={!connected || writing || dictation.state === 'starting'}
                   aria-label={writing ? 'Writing down what you said' : 'Dictate a message'} aria-pressed="false" title="Dictate">
                   {writing ? <span className="mic-spinner" aria-hidden /> : <IconMic size={18} aria-hidden />}
                 </button>
@@ -431,6 +489,7 @@ export function Chat() {
       )}
       {error && <p className="error composer-error">{error}</p>}
       {!viewing && dictation.error && <p className="error composer-error">{dictation.error}</p>}
+      {speech.error && <p className="error composer-error">{speech.error}</p>}
       {clearing && (
         <ConfirmDelete
           title="Clear this conversation?"

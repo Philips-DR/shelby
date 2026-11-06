@@ -12,13 +12,15 @@ runs it from there.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import subprocess
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from . import keeping, operations
+from .speaking import MAX_SPEAK_CHARS, Speaker
 from .background import ROOT, JobError
 
 VERSION = "0.1.0"
@@ -48,8 +50,29 @@ def approval_preview(preview_tool: str, argument_map: dict[str, str], field: str
     return {"approval": {"preview_tool": preview_tool, "argument_map": argument_map, **({"field": field} if field else {})}}
 
 
-def create_audiobook_server(paths: ServerPaths) -> MCPServer:
+def create_audiobook_server(paths: ServerPaths, speaker: Speaker | None = None) -> MCPServer:
     server = MCPServer(name="audiobook", version=VERSION)
+    # One per server process: its model stays loaded between replies (speaking.py).
+    speaker = speaker or Speaker()
+
+    @server.tool(
+        name="speak",
+        title="Say a short text aloud",
+        description=(
+            f"Text to speech for the chat page: up to {MAX_SPEAK_CHARS} characters in (a sentence or two of a "
+            "reply), an MP3 of it out as base64, in a saved voice (abigail when there is one) or a preset. Runs on "
+            "this machine, keeps the model loaded between calls, and writes nothing. Not for books: use "
+            "start_render."
+        ),
+        annotations=READ,
+        # For the page only: the model has no speaker, and every tool it is shown costs it context.
+        meta={"interface_only": True},
+    )
+    def _speak(text: str, voice: str | None = None) -> dict:
+        try:
+            return asdict(speaker.speak(text, voice))
+        except (*FAILURES, subprocess.CalledProcessError) as error:
+            return _failed(error)
 
     @server.tool(
         name="list_voices",

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import binascii
 import json
 import os
 import secrets
@@ -32,7 +34,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from assistant.approval import WEB_PREVIEW_LIMIT, needs_approval, sanitise
@@ -103,6 +105,8 @@ def approval_view(request: ApprovalRequest) -> dict[str, Any]:
 # the same is about 23 MB.
 DICTATION_TOOL = "meet_ai__dictate"
 MAX_DICTATION_BYTES = 25 * 1024**2
+# Speaking a reply (audiobook's `speak`): the page sends a sentence or two at a time and plays each as it comes.
+SPEECH_TOOL = "audiobook__speak"
 
 
 def parsed(output: str) -> Any:
@@ -296,6 +300,11 @@ class RecordDeletion(BaseModel):
 
 class ConversationRename(BaseModel):
     title: str
+
+
+class SpeechRequest(BaseModel):
+    text: str
+    voice: str | None = None
 
 
 class ActionRequest(BaseModel):
@@ -780,6 +789,27 @@ def create_app(
             message = result.get("error") if isinstance(result, dict) else output
             return JSONResponse({"error": message or "Dictation failed."}, status_code=422)
         return result
+
+    @app.post("/api/speak")
+    async def speak(body: SpeechRequest) -> Any:
+        """A sentence or two of a reply, spoken: MP3 bytes back. A read from the page, so not audited and not shown as
+        a step (session.execute), and nothing is kept. Refusals are {"error"}."""
+        h = hub()
+        tool = h.registry.find(SPEECH_TOOL)
+        if tool is None:
+            return JSONResponse({"error": "Speaking replies needs the audiobook tool, which is not running."},
+                                status_code=503)
+        arguments: dict[str, Any] = {"text": body.text, **({"voice": body.voice} if body.voice else {})}
+        output, outcome = await execute(h.registry, tool, arguments, h.audit, allow_gate, h.emit, origin="button")
+        result = parsed(output)
+        if outcome != "ok" or not isinstance(result, dict) or result.get("error") or not result.get("audio"):
+            message = result.get("error") if isinstance(result, dict) else output
+            return JSONResponse({"error": message or "Speaking failed."}, status_code=422)
+        try:
+            audio = base64.b64decode(result["audio"], validate=True)
+        except (binascii.Error, ValueError, TypeError):
+            return JSONResponse({"error": "The audiobook tool sent back something that is not audio."}, status_code=502)
+        return Response(audio, media_type=str(result.get("mime") or "audio/mpeg"), headers={"cache-control": "no-store"})
 
     @app.put("/api/uploads/book")
     async def upload_book(request: Request, name: str):
