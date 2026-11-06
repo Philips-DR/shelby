@@ -21,7 +21,6 @@
 .bubble:hover .read-aloud, .read-aloud:focus-visible, .read-aloud.reading { opacity: 1; }
 .read-aloud.reading { color: var(--brand); background: var(--brand-soft); }
 @media (hover: none) { .read-aloud { opacity: 0.55; } }
-.speak-replies.on { color: var(--brand); background: var(--brand-soft); }
 
 .chat-stopped { align-self: flex-start; margin: 0 0 0 36px; }
 .composer .send.stop { color: var(--ink); background: var(--bg-2); border: 1px solid var(--line-strong); }

@@ -541,8 +541,10 @@ which go into the message box to be read and sent by hand. Never sent by themsel
 - **`POST /api/speak {text, voice?}`** sends a sentence or two to audiobook's `speak` and returns the MP3 bytes
   (`no-store`). The same rules: a page read, not audited or shown; nothing kept; refusals are `{"error"}`. The page
   turns a reply's markdown into sentences (`web/src/components/speechText.ts`: code and tables are said to be on
-  screen, never read), asks for one while the one before plays, and pauses an audiobook that is playing. "Speak
-  replies" reads only replies that arrive after it is turned on; dictating or sending stops a reading.
+  screen, never read), asks for one while the one before plays, and pauses an audiobook that is playing. **A reply is
+  read only when its speaker button is pressed** (the user's choice: an automatic "Speak replies" switch was built and
+  taken out the same day). The press also plays a moment of silence, because a phone's browser plays sound only from an
+  element a press has started; dictating or sending stops a reading.
 - **The containers' model cache does not yet hold base.en** (`data/cache/huggingface`, checked 2026-11-06). The first
   clip after deploying downloads it (about 140 MB) and is slow once.
 

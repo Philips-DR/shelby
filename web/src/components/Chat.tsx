@@ -33,10 +33,6 @@ const HAS_MIC = canRecordInBrowser()
 // The two speech tools, page-only (their _meta): the controls show only when the tool is there to answer.
 const DICTATE = 'meet_ai__dictate'
 const SPEAK = 'audiobook__speak'
-const SPEAK_REPLIES_KEY = 'assistant-speak-replies'
-const storedSpeakReplies = (): boolean => {
-  try { return localStorage.getItem(SPEAK_REPLIES_KEY) === '1' } catch { return false }
-}
 
 const CONVERSATION = new Set(['user_message', 'assistant_text', 'approval_needed', 'turn_error', 'turn_stopped'])
 
@@ -135,24 +131,8 @@ export function Chat() {
   // bar (chat.css), which moved the box 64px between press and release, so the release missed the button and nothing
   // happened (found in Chrome as a phone). The keyboard still reaches them with Tab.
   const keepFocus = (e: MouseEvent) => e.preventDefault()
+  // A reply is read aloud only when its speaker button is pressed (the user's choice, 2026-11-06): never by itself.
   const speech = useSpeech()
-  // "Speak replies": each reply that arrives after it is turned on is read in turn, never the ones already there.
-  const [speakReplies, setSpeakReplies] = useState(storedSpeakReplies)
-  const latestSeq = Math.max(0, ...events.map((e) => e.seq))
-  const spokenUpTo = useRef(latestSeq)
-  const toggleSpeakReplies = () => {
-    const on = !speakReplies
-    setSpeakReplies(on)
-    try { localStorage.setItem(SPEAK_REPLIES_KEY, on ? '1' : '0') } catch { /* this browser keeps nothing; the switch still works */ }
-    if (on) { spokenUpTo.current = latestSeq; speech.unlock() } else speech.stop()
-  }
-  useEffect(() => {
-    if (!speakReplies || !canSpeak) { spokenUpTo.current = latestSeq; return }
-    for (const e of events) {
-      if (e.seq > spokenUpTo.current && e.type === 'assistant_text' && e.text) speech.queue(`a${e.seq}`, e.text)
-    }
-    spokenUpTo.current = latestSeq
-  }, [events, latestSeq, speakReplies, canSpeak, speech.queue])
   const listening = dictation.state === 'recording'
   const writing = dictation.state === 'transcribing'
   const { cancel: cancelDictation } = dictation
@@ -356,12 +336,6 @@ export function Chat() {
         </button>
         {viewing && (
           <span className="chat-viewing-title">{viewing.title || 'Untitled'}</span>
-        )}
-        {canSpeak && (
-          <button className={`ghost speak-replies${speakReplies ? ' on' : ''}`} onClick={toggleSpeakReplies} aria-pressed={speakReplies} aria-label="Speak replies"
-            title={speakReplies ? 'Replies are read aloud as they arrive' : 'Read replies aloud as they arrive'}>
-            <IconSpeak size={15} aria-hidden /><span className="chat-tools-label">Speak replies</span>
-          </button>
         )}
         <span className="chat-tools-spacer" />
         {viewing ? (

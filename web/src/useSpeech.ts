@@ -1,8 +1,8 @@
-// Replies read aloud in Pocket TTS (audiobook's speak, through /api/speak). A reply is said a sentence at a time
-// (speechText.ts): the next is fetched while the one before plays, and at the 8-bit model's 2x real time it is ready
-// long before it is needed, so only the first sentence is waited for. One audio element for the page's life: a
-// phone's browser plays sound later only from an element a press has started once, and turning on "Speak replies"
-// is that press (unlock).
+// A reply read aloud in Pocket TTS (audiobook's speak, through /api/speak), when its speaker button is pressed. It is
+// said a sentence at a time (speechText.ts): the next is fetched while the one before plays, and at the 8-bit model's
+// 2x real time it is ready long before it is needed, so only the first sentence is waited for. One audio element for
+// the page's life, started with a moment of silence by the press itself: a phone's browser (Safari) plays sound only
+// from an element a press has started, and the first sentence arrives after the press is over.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { speakText } from './api'
@@ -15,13 +15,9 @@ export interface Speech {
   /** Waiting for its first sentence. */
   starting: boolean
   error: string
-  /** Read this reply now, instead of whatever is being read. */
+  /** Read this reply now, instead of whatever is being read. Call it from the press itself. */
   read: (key: string, markdown: string) => void
-  /** Read this reply after whatever is being read (a reply arriving while "Speak replies" is on). */
-  queue: (key: string, markdown: string) => void
   stop: () => void
-  /** From a press: lets a phone's browser play sound from this page later. */
-  unlock: () => void
 }
 
 interface Item { key: string; parts: string[] }
@@ -131,17 +127,17 @@ export function useSpeech(): Speech {
     if (owner.current === null) void pump()
   }, [pump])
 
-  const read = useCallback((key: string, markdown: string) => { stop(); queue(key, markdown) }, [stop, queue])
-
+  /** From the press: a moment of silence, so a phone's browser lets this element play the reply when it arrives. */
   const unlock = useCallback(() => {
-    if (owner.current !== null) return
     const el = element()
     const url = URL.createObjectURL(silence())
     el.src = url
     el.play().catch(() => {}).finally(() => URL.revokeObjectURL(url))
   }, [])
 
+  const read = useCallback((key: string, markdown: string) => { stop(); unlock(); queue(key, markdown) }, [stop, unlock, queue])
+
   useEffect(() => stop, [stop]) // leaving Chat stops the reading
 
-  return { reading, starting, error, read, queue, stop, unlock }
+  return { reading, starting, error, read, stop }
 }
