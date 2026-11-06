@@ -54,4 +54,8 @@ export {
   Trash2 as IconTrash,
   X as IconClose,
   Zap as IconZap,
+  PanelLeftOpen as IconPanelOpen,
+  PanelLeftClose as IconPanelClose,
+  SquarePen as IconNewChat,
+  Pencil as IconRename,
 } from 'lucide-react'

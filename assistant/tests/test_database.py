@@ -26,6 +26,7 @@ import pytest
 from assistant import db as database_module
 from assistant.audit import SUMMARY_LIMIT, FileAuditStore, PgAuditStore
 from assistant.auth import MemorySessionStore, PgSessionStore
+from assistant.conversations import ConversationStore
 from assistant.db import Database, _audit_rows, _fact_rows, _retire, migrate
 from assistant.memory import FileMemoryStore, PgMemoryStore
 from assistant.server import Hub, create_app
@@ -211,7 +212,7 @@ def test_migrations_apply_once_in_order_and_a_failing_one_leaves_nothing_behind(
     assert first == ["001_a.sql", "002_b.sql"] and again == []
     assert c_exists is False  # the failed file was rolled back whole
     assert recorded == ["001_a.sql", "001_initial.sql", "002_b.sql", "002_files.sql", "003_file_texts.sql",
-                        "004_records.sql"]
+                        "004_records.sql", "005_conversations.sql"]
 
 
 @needs_postgres
@@ -395,3 +396,32 @@ def test_the_app_keeps_memory_history_and_sessions_across_a_restart(tmp_path):
     assert [(r["tool"], r["outcome"], r["origin"]) for r in history] == [("assistant__remember", "ok", "button")]
     assert json.loads((tmp_path / "lexicon.json").read_text()) == {"Accra": ["Akra"]}
     assert not (tmp_path / "memory.json").exists()  # nothing was written to the old file
+
+
+@needs_postgres
+def test_conversations_are_kept_listed_newest_first_renamed_and_deleted_in_the_database():
+    a, b = "a" * 32, "b" * 32
+
+    async def scenario():
+        async with scratch_database() as url:
+            async with Database(url) as database:
+                store = ConversationStore(database)
+                await store.save(a, "First", [{"type": "user_message", "text": "hi"}], 1)
+                await store.save(b, "Second", [{"type": "user_message", "text": "yo"}], 1)
+                # Saved again after a later turn: the same row, now the newest.
+                await store.save(a, "First", [{"type": "user_message", "text": "hi"},
+                                               {"type": "turn_done", "text": "hello"}], 1)
+                listed = [c["id"] for c in await store.list()]
+                events = (await store.get(a))["events"]
+                renamed = (await store.rename(b, "Renamed"), await store.rename("c" * 32, "x"))
+                deleted = (await store.delete(a), await store.delete(a))
+                left = [(c["id"], c["title"]) for c in await store.list()]
+                with pytest.raises(Exception):
+                    await store.save("not-an-id", "x", [], 0)  # the table takes only the ids it makes
+                return listed, events, renamed, deleted, left
+
+    listed, events, renamed, deleted, left = run(scenario())
+    assert listed == [a, b]
+    assert [e["type"] for e in events] == ["user_message", "turn_done"]
+    assert renamed == (True, False) and deleted == (True, False)
+    assert left == [(b, "Renamed")]

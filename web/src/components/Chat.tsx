@@ -5,17 +5,23 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AUDIO_EXTS, clearChat, isAudio, isMarkdown, sendChat, splitDocs, stopChat, uploadAudio, uploadDocs } from '../api'
+import { AUDIO_EXTS, clearChat, getConversation, isAudio, isMarkdown, sendChat, splitDocs, stopChat, uploadAudio, uploadDocs, type AssistantEvent } from '../api'
 import { useAppState } from '../state'
 import { BrandMark } from '../ui/Shell'
 import { DropZone } from '../ui/DropZone'
-import { IconAttach, IconCheck, IconChevron, IconCopy, IconSend, IconSpark, IconStop, IconTrash } from '../ui/icons'
+import { useLayer } from '../ui/useLayer'
+import { IconAttach, IconCheck, IconChevron, IconCopy, IconPanelOpen, IconSend, IconSpark, IconStop, IconTrash } from '../ui/icons'
 import { ConfirmDelete } from '../ui/ConfirmDelete'
 import { PickFiles, UploadProgress } from './Upload'
+import { ChatHistory } from './ChatHistory'
 import { ApprovalCard } from './ApprovalCard'
 import { StepGroup } from './StepDetails'
 import { pairSteps, type Step } from './toolSteps'
 import '../styles/panels/chat.css'
+
+// What sits over Chat or takes its place, kept in the history (useLayer.ts): the history panel, or a past
+// conversation by its id. Back closes the panel, and from a past conversation returns to the current one.
+type ChatLayer = { panel?: 'history'; viewing?: string } | null
 
 const CONVERSATION = new Set(['user_message', 'assistant_text', 'approval_needed', 'turn_error', 'turn_stopped'])
 
@@ -56,6 +62,29 @@ export function Chat() {
   const [clearBusy, setClearBusy] = useState(false)
   const [clearError, setClearError] = useState('')
   const [stopping, setStopping] = useState(false)
+  const [layer, setLayer] = useState<ChatLayer>(null)
+  useLayer('chat', layer, setLayer)
+  const [opened, setOpened] = useState<{ id: string; events: AssistantEvent[]; title: string } | null>(null)
+  const historyOpen = layer?.panel === 'history'
+  const viewingId = layer?.viewing ?? null
+  const viewing = viewingId !== null && opened?.id === viewingId ? opened : null
+  const historyButton = useRef<HTMLButtonElement>(null)
+  // Arrived at a past conversation by Forward or a reload: the history holds only its id, so it is fetched again.
+  // One that is gone (deleted elsewhere) closes, back to the current chat.
+  useEffect(() => {
+    if (viewingId === null || opened?.id === viewingId) return
+    let live = true
+    getConversation(viewingId)
+      .then((c) => { if (live) setOpened({ id: c.id, events: c.events, title: c.title }) })
+      .catch(() => { if (live) setLayer(null) })
+    return () => { live = false }
+  }, [viewingId, opened?.id])
+  // The panel closed: focus goes back to the button that opened it, not to the top of the page.
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (wasOpen.current && !historyOpen) historyButton.current?.focus()
+    wasOpen.current = historyOpen
+  }, [historyOpen])
   const scroller = useRef<HTMLDivElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
@@ -132,7 +161,8 @@ export function Chat() {
   // A cleared chat starts empty. The server keeps a button's own result, which Overview and Activity list, but
   // Chat shows nothing from before the last clear (found live: a "You pressed" chip outlived Clear chat).
   const clearedAt = Math.max(0, ...events.filter((e) => e.type === 'chat_cleared').map((e) => e.seq))
-  const visible = events.filter((e) => e.seq > clearedAt)
+  const liveVisible = events.filter((e) => e.seq > clearedAt)
+  const visible = viewing ? viewing.events : liveVisible
   const asked = visible.filter((e) => e.type === 'user_message').length
   const talked = visible.some((e) => CONVERSATION.has(e.type) || (e.type === 'tool_finished' && e.origin !== 'button'))
   const canClear = connected && !busy && pending.length === 0
@@ -237,13 +267,31 @@ export function Chat() {
       disabled={!connected || uploading !== null}
     >
       <h1 className="sr-only">Chat</h1>
-      {asked > 0 && (
-        <div className="chat-tools">
+      <div className="chat-tools">
+        <button ref={historyButton} className="ghost" onClick={() => setLayer({ panel: 'history' })} aria-label="Chat history" title="Chat history">
+          <IconPanelOpen size={15} aria-hidden /><span className="chat-tools-label">History</span>
+        </button>
+        {viewing && (
+          <span className="chat-viewing-title">{viewing.title || 'Untitled'}</span>
+        )}
+        <span className="chat-tools-spacer" />
+        {viewing ? (
+          <button className="ghost" onClick={() => setLayer(null)}>
+            Back to chat
+          </button>
+        ) : asked > 0 ? (
           <button className="ghost" onClick={() => { setClearError(''); setClearing(true) }} disabled={!canClear} title={busy ? 'Wait for the reply to finish' : undefined}>
             <IconTrash size={14} aria-hidden />Clear chat
           </button>
-        </div>
-      )}
+        ) : null}
+      </div>
+      <ChatHistory
+        open={historyOpen}
+        onClose={() => setLayer(null)}
+        busy={busy}
+        onLoad={(id, evts, title) => { setOpened({ id, events: evts, title }); setLayer({ viewing: id }) }}
+        onNewChat={() => setLayer(null)}
+      />
       <div className="transcript" aria-live="polite" ref={scroller}>
         {/* Empty means no conversation, not no events: a background notice, or a button pressed on another page,
             is an event too, and once hid the suggestions behind four chips. */}
@@ -262,7 +310,7 @@ export function Chat() {
 
         {rows}
 
-        {busy && pending.length === 0 && (
+        {!viewing && busy && pending.length === 0 && (
           <div className="msg assistant-msg">
             <span className="avatar working" aria-hidden><BrandMark size={26} /></span>
             <div className="thinking" role="status" aria-label={stopping ? 'Stopping' : 'Working'}>
@@ -270,7 +318,7 @@ export function Chat() {
             </div>
           </div>
         )}
-        {pending
+        {!viewing && pending
           .filter((p) => !events.some((e) => e.type === 'approval_needed' && e.id === p.id))
           .map((p) => <ApprovalCard key={p.id} approval={p} />)}
         <div ref={bottom} className="chat-end" />
@@ -282,47 +330,55 @@ export function Chat() {
         </button>
       )}
 
-      {(attached.length > 0 || uploading) && (
+      {!viewing && (attached.length > 0 || uploading) && (
         <div className="attachments">
           {attached.map((name, i) => <span key={`${name}-${i}`} className="chip"><IconAttach size={13} aria-hidden />{name}</span>)}
           {uploading && <UploadProgress name={uploading.name} fraction={uploading.fraction} />}
         </div>
       )}
 
-      <form className="composer" onSubmit={(e) => void submit(e)}>
-        <PickFiles
-          label=""
-          ariaLabel="Attach a recording or a markdown file"
-          icon={<IconAttach size={18} aria-hidden />}
-          accept={[...AUDIO_EXTS, '.md'].join(',') + ',audio/*'}
-          multiple
-          disabled={!connected || uploading !== null}
-          onPick={(files) => void attach(files)}
-          className="ghost attach"
-        />
-        <textarea
-          ref={field}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKey}
-          placeholder={!connected ? 'Reconnecting…' : busy ? 'Working…' : 'Message the assistant'}
-          disabled={!connected}
-          rows={1}
-          aria-label="Message"
-        />
-        {busy
-          ? (
-            <button className="send stop" type="button" onClick={() => void stop()} disabled={stopping} aria-label={stopping ? 'Stopping the reply' : 'Stop the reply'} title="Stop">
-              <IconStop size={16} aria-hidden />
-            </button>
-          )
-          : (
-            <button className="primary send" type="submit" disabled={!draft.trim() || !connected} aria-label="Send">
-              <IconSend size={18} aria-hidden />
-            </button>
-          )}
-      </form>
-      <p className="composer-hint muted small">{busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a markdown file to attach it'}</p>
+      {viewing ? (
+        <div className="viewing-footer">
+          <button className="primary" onClick={() => setLayer(null)}>Back to current chat</button>
+        </div>
+      ) : (
+        <>
+          <form className="composer" onSubmit={(e) => void submit(e)}>
+            <PickFiles
+              label=""
+              ariaLabel="Attach a recording or a markdown file"
+              icon={<IconAttach size={18} aria-hidden />}
+              accept={[...AUDIO_EXTS, '.md'].join(',') + ',audio/*'}
+              multiple
+              disabled={!connected || uploading !== null}
+              onPick={(files) => void attach(files)}
+              className="ghost attach"
+            />
+            <textarea
+              ref={field}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKey}
+              placeholder={!connected ? 'Reconnecting…' : busy ? 'Working…' : 'Message the assistant'}
+              disabled={!connected}
+              rows={1}
+              aria-label="Message"
+            />
+            {busy
+              ? (
+                <button className="send stop" type="button" onClick={() => void stop()} disabled={stopping} aria-label={stopping ? 'Stopping the reply' : 'Stop the reply'} title="Stop">
+                  <IconStop size={16} aria-hidden />
+                </button>
+              )
+              : (
+                <button className="primary send" type="submit" disabled={!draft.trim() || !connected} aria-label="Send">
+                  <IconSend size={18} aria-hidden />
+                </button>
+              )}
+          </form>
+          <p className="composer-hint muted small">{busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a markdown file to attach it'}</p>
+        </>
+      )}
       {error && <p className="error composer-error">{error}</p>}
       {clearing && (
         <ConfirmDelete

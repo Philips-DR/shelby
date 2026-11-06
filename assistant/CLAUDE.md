@@ -510,6 +510,22 @@ before.
 - **The URL hash is followed on change, not just read on load.** A hash change does not reload
   the page, so reading it once left back, bookmarks and edited URLs showing the old section.
 
+## Past conversations (`conversations.py`, `005_conversations.sql`, 2026-11-06)
+
+Chat keeps each conversation in the `conversations` table: its id, a title (the first message, cut at a word,
+renamable), the events Chat showed (JSONB) and how many messages it holds. It is saved after every turn and when
+Chat is cleared; one with no message in it is not kept. With no database there is no history and nothing fails.
+The page lists them, opens one read-only (the model is not given it back), renames and deletes them.
+
+- **The conversation Chat is in is special.** Deleted, it leaves Chat too (as Clear chat does) and is refused
+  while a message in it is being worked on: left open, its next turn saved it again, deleted messages and old title
+  and all (found in Chrome). Renamed, the hub's own title changes too, or the next save put the old one back.
+- **Deleting is audited** (`assistant__delete_conversation`, its title and size). Clearing saves first; deleting
+  the current one clears without saving.
+- **The page treats the panel and an opened conversation as one layer** (`web/DESIGN.md` -> Back): Back closes the
+  panel, and from a past conversation returns to the current one. The history keeps only the id, so Forward or a
+  reload fetches it again.
+
 ## Approval previews
 
 - **A tool may declare, in `_meta`, the read-only tool that renders its effect.** The gate

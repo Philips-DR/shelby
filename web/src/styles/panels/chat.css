@@ -2,7 +2,10 @@
 
 .chat { position: relative; }
 .transcript { padding-top: 14px; }
-.chat-tools { display: flex; justify-content: flex-end; padding: 6px 4px 0; }
+.chat-tools { display: flex; align-items: center; gap: 6px; padding: 6px 4px 0; }
+.chat-tools-spacer { flex: 1; }
+.chat-tools-label { display: inline; }
+.chat-viewing-title { font-weight: 600; font-size: var(--fs-sm); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 .msg { display: flex; align-items: flex-start; gap: 10px; align-self: flex-start; max-width: 100%; animation: rise var(--dur-3) var(--ease) both; }
 .avatar { flex: none; margin-top: 2px; border-radius: 8px; }
 .avatar.working svg { animation: spin 2.4s linear infinite; }
@@ -45,4 +48,158 @@
   .shell:has(.composer:focus-within) .page.page-chat { height: calc(100dvh - var(--bar-h) - env(safe-area-inset-top, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
   .to-latest { bottom: 96px; right: 12px; width: 44px; height: 44px; padding: 0; border-radius: 50%; }
   .to-latest span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .chat-tools-label { display: none; }
+}
+
+/* Viewing a past conversation: read-only footer */
+.viewing-footer { display: flex; justify-content: center; padding: 14px; }
+
+/* ---- history drawer overlay ----------------------------------------------------------------- */
+
+.history-root { position: fixed; inset: 0; z-index: 55; pointer-events: none; }
+.history-root.open { pointer-events: auto; }
+.history-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+  opacity: 0;
+  transition: opacity var(--dur-3) var(--ease);
+}
+.history-root.open .history-backdrop { opacity: 1; }
+
+.history-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(320px, 85vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  transform: translateX(-100%);
+  transition: transform var(--dur-3) var(--ease);
+}
+.history-root.open .history-panel { transform: none; }
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px 8px;
+}
+.history-head h2 { margin: 0; font-size: var(--fs-md); font-weight: 650; }
+
+.history-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 10px 14px;
+  border-radius: var(--r-control);
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease);
+}
+.history-new:hover:not(:disabled) { background: var(--brand-line); }
+.history-new:disabled { opacity: 0.5; cursor: default; }
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 6px 16px;
+}
+
+.history-group { margin-top: 8px; }
+.history-group-label {
+  display: block;
+  padding: 6px 10px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-3);
+}
+
+.conv-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-control);
+  transition: background-color var(--dur-1) var(--ease);
+}
+.conv-item:hover { background: var(--bg-2); }
+
+.conv-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 9px 4px 9px 10px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.conv-select:hover { background: transparent; }
+.conv-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.conv-actions { position: relative; flex: none; }
+.conv-menu-btn { opacity: 0; width: 30px; min-height: 30px; padding: 0; }
+/* Shown on hover, and to the keyboard: a button nobody can see is still a Tab stop. */
+.conv-item:hover .conv-menu-btn, .conv-item:focus-within .conv-menu-btn { opacity: 1; }
+/* A finger needs 40px (DESIGN.md, rule 5). */
+@media (hover: none) { .conv-actions .conv-menu-btn { opacity: 0.6; width: 40px; min-width: 40px; min-height: 40px; } }
+.history-empty { padding: 12px 14px; }
+
+.conv-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  box-shadow: var(--shadow-2);
+}
+.conv-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.conv-menu button:hover { background: var(--bg-2); }
+.conv-menu button.danger { color: var(--bad); }
+.conv-menu button.danger:hover { background: var(--bad-soft); }
+
+.conv-item.editing { padding: 4px 10px; }
+.conv-rename-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--brand);
+  border-radius: 6px;
+  font-size: var(--fs-sm);
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }

@@ -529,3 +529,208 @@ def test_the_chat_cannot_be_cleared_while_an_approval_is_waiting(tmp_path):
 
     refused, kept = run(with_client(app, body))
     assert refused.status_code == 409 and kept == 1
+
+
+# ---------------------------------------------------------------------------
+# Conversation history
+# ---------------------------------------------------------------------------
+
+class DictConversations:
+    """What the routes and the hub ask of a conversation store, held in a dict: no PostgreSQL needed."""
+
+    def __init__(self):
+        self.rows = {}
+
+    async def list(self, limit=50):
+        return [{k: v for k, v in row.items() if k != "events"} for row in list(self.rows.values())[:limit]]
+
+    async def get(self, conversation_id):
+        return self.rows.get(conversation_id)
+
+    async def save(self, conversation_id, title, events, message_count):
+        self.rows[conversation_id] = {"id": conversation_id, "title": title, "events": events,
+                                      "message_count": message_count, "created_at": "2026-11-06T09:00:00+00:00",
+                                      "updated_at": "2026-11-06T09:00:00+00:00"}
+        return conversation_id
+
+    async def delete(self, conversation_id):
+        return self.rows.pop(conversation_id, None) is not None
+
+    async def rename(self, conversation_id, title):
+        if conversation_id not in self.rows:
+            return False
+        self.rows[conversation_id]["title"] = title
+        return True
+
+
+def test_a_conversation_is_titled_by_its_first_message_cut_at_a_word():
+    from assistant.conversations import TITLE_MAX, title_from_message
+
+    assert title_from_message("  What did Kwame say?\n") == "What did Kwame say?"
+    assert title_from_message("first line\nsecond line") == "first line second line"
+    long = title_from_message("word " * 40)
+    assert long.endswith("…") and len(long) <= TITLE_MAX + 1 and not long[:-1].endswith(" ")
+
+
+def test_clearing_the_chat_keeps_the_conversation_in_history_without_what_was_not_conversation(tmp_path):
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = store = DictConversations()
+        hub.conversation_id, hub.conversation_title = "a" * 32, "What did Kwame say?"
+        for event in (
+            {"type": "user_message", "text": "What did Kwame say?"},
+            {"type": "assistant_text", "text": "He agreed."},
+            {"type": "turn_done", "text": "He agreed."},
+            {"type": "notice", "title": "Transcription finished"},
+        ):
+            await hub.emit(event)
+        cleared = await client.post("/api/chat/clear", headers=AUTH)
+        return cleared, store, hub
+
+    cleared, store, hub = run(with_client(app, body))
+    assert cleared.status_code == 200
+    kept = store.rows["a" * 32]
+    assert kept["title"] == "What did Kwame say?" and kept["message_count"] == 1
+    assert [e["type"] for e in kept["events"]] == ["user_message", "assistant_text", "turn_done"]
+    assert hub.conversation_id is None and hub.conversation_title == ""  # the next message starts a new one
+
+
+def test_a_conversation_with_no_message_in_it_is_not_kept(tmp_path):
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = store = DictConversations()
+        hub.conversation_id = "a" * 32
+        await hub.emit({"type": "notice", "title": "Transcription finished"})
+        await client.post("/api/chat/clear", headers=AUTH)
+        return store
+
+    assert run(with_client(app, body)).rows == {}
+
+
+def test_past_conversations_are_listed_opened_renamed_and_deleted(tmp_path):
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = store = DictConversations()
+        await store.save("a" * 32, "First", [{"type": "user_message", "text": "hi"}], 1)
+        listed = (await client.get("/api/conversations", headers=AUTH)).json()
+        opened = (await client.get(f"/api/conversations/{'a' * 32}", headers=AUTH)).json()
+        empty = await client.patch(f"/api/conversations/{'a' * 32}", headers=AUTH, json={"title": "   "})
+        renamed = await client.patch(f"/api/conversations/{'a' * 32}", headers=AUTH, json={"title": " Kwame "})
+        title = store.rows["a" * 32]["title"]
+        deleted = await client.delete(f"/api/conversations/{'a' * 32}", headers=AUTH)
+        return listed, opened, empty.status_code, renamed.status_code, title, deleted.status_code, store.rows
+
+    listed, opened, empty, renamed, title, deleted, left = run(with_client(app, body))
+    assert [c["title"] for c in listed] == ["First"] and "events" not in listed[0]  # the list is light
+    assert opened["events"] == [{"type": "user_message", "text": "hi"}]
+    assert empty == 400 and renamed == 200 and title == "Kwame"
+    assert deleted == 200 and left == {}
+
+
+def test_a_conversation_that_is_not_there_is_a_404_whatever_is_asked_of_it(tmp_path):
+    app = app_for(tmp_path)
+
+    async def body(client):
+        app.state.hub.conversations = DictConversations()
+        missing = f"/api/conversations/{'b' * 32}"
+        return [(await client.get(missing, headers=AUTH)).status_code,
+                (await client.delete(missing, headers=AUTH)).status_code,
+                (await client.patch(missing, headers=AUTH, json={"title": "x"})).status_code]
+
+    assert run(with_client(app, body)) == [404, 404, 404]
+
+
+def test_with_no_database_there_is_no_history_and_nothing_fails(tmp_path):
+    async def body(client):
+        return ((await client.get("/api/conversations", headers=AUTH)).json(),
+                (await client.get(f"/api/conversations/{'a' * 32}", headers=AUTH)).status_code)
+
+    assert run(with_client(app_for(tmp_path), body)) == ([], 404)
+
+
+def test_conversation_history_needs_the_token(tmp_path):
+    async def body(client):
+        return [(await client.get("/api/conversations")).status_code,
+                (await client.delete(f"/api/conversations/{'a' * 32}")).status_code]
+
+    assert run(with_client(app_for(tmp_path), body)) == [401, 401]
+
+
+def test_deleting_the_conversation_chat_is_in_empties_chat_and_it_does_not_come_back(tmp_path):
+    """Found in Chrome: deleted from the list while still open, the next message saved it again with its old title
+    and the deleted messages."""
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = store = DictConversations()
+        hub.conversation_id, hub.conversation_title = "a" * 32, "Kwame"
+        hub.messages.append({"role": "user", "content": "Kwame?"})
+        await hub.emit({"type": "user_message", "text": "Kwame?"})
+        await hub.save_conversation()
+        deleted = await client.delete(f"/api/conversations/{'a' * 32}", headers=AUTH)
+        await hub.save_conversation()  # what the next turn does on its way out
+        return deleted.json(), store.rows, hub
+
+    deleted, rows, hub = run(with_client(app, body))
+    assert deleted == {"deleted": True, "cleared": True}
+    assert rows == {} and hub.messages == [] and hub.conversation_id is None
+    audit = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert (audit[-1]["tool"], audit[-1]["origin"]) == ("assistant__delete_conversation", "button")
+    assert "Kwame" in audit[-1]["result"] and "Chat cleared" in audit[-1]["result"]
+
+
+def test_deleting_an_older_conversation_leaves_chat_alone(tmp_path):
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = store = DictConversations()
+        await store.save("b" * 32, "Older", [{"type": "user_message", "text": "hi"}], 1)
+        hub.conversation_id = "a" * 32
+        hub.messages.append({"role": "user", "content": "now"})
+        deleted = await client.delete(f"/api/conversations/{'b' * 32}", headers=AUTH)
+        return deleted.json(), hub
+
+    deleted, hub = run(with_client(app, body))
+    assert deleted == {"deleted": True, "cleared": False}
+    assert hub.conversation_id == "a" * 32 and len(hub.messages) == 1
+
+
+def test_the_conversation_chat_is_in_cannot_be_deleted_mid_reply(tmp_path):
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = store = DictConversations()
+        await store.save("a" * 32, "Kwame", [{"type": "user_message", "text": "hi"}], 1)
+        hub.conversation_id = "a" * 32
+        hub.turn = asyncio.get_running_loop().create_future()  # a reply in progress
+        refused = await client.delete(f"/api/conversations/{'a' * 32}", headers=AUTH)
+        hub.turn.cancel()
+        return refused.status_code, store.rows
+
+    status, rows = run(with_client(app, body))
+    assert status == 409 and "a" * 32 in rows
+
+
+def test_renaming_the_conversation_chat_is_in_survives_its_next_message(tmp_path):
+    app = app_for(tmp_path)
+
+    async def body(client):
+        hub = app.state.hub
+        hub.conversations = store = DictConversations()
+        hub.conversation_id, hub.conversation_title = "a" * 32, "What did Kwame say?"
+        await hub.emit({"type": "user_message", "text": "What did Kwame say?"})
+        await hub.save_conversation()
+        await client.patch(f"/api/conversations/{'a' * 32}", headers=AUTH, json={"title": "Kwame and the budget"})
+        await hub.save_conversation()  # the next turn
+        return store.rows["a" * 32]["title"]
+
+    assert run(with_client(app, body)) == "Kwame and the budget"

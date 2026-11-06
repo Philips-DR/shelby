@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 from assistant.approval import WEB_PREVIEW_LIMIT, needs_approval, sanitise
 from assistant.audit import AuditStore
+from assistant.conversations import ConversationStore, NullConversationStore, title_from_message, _new_id
 from assistant.auth import (
     AuthError, MemorySessionStore, PgSessionStore, clear_cookie, exchange_code, fetch_userinfo,
     google_login_url, parse_allowed_emails, pkce_pair, set_cookie,
@@ -118,7 +119,8 @@ class Hub:
     """Everything the browser and the model share."""
 
     def __init__(self, registry: ToolRegistry, config: Any, context: str, audit: AuditStore,
-                 refresh_context: Callable[[], Awaitable[str]] | None = None) -> None:
+                 refresh_context: Callable[[], Awaitable[str]] | None = None,
+                 conversations: ConversationStore | NullConversationStore | None = None) -> None:
         self.registry = registry
         self.config = config
         self.context = context
@@ -126,6 +128,9 @@ class Hub:
         # corrected -- must reach the model on the next turn, not after a restart.
         self.refresh_context = refresh_context
         self.audit = audit
+        self.conversations = conversations or NullConversationStore()
+        self.conversation_id: str | None = None
+        self.conversation_title: str = ""
         self.messages: list[dict[str, Any]] = []
         self.notes: list[str] = []
         self.turn: asyncio.Task | None = None
@@ -172,9 +177,26 @@ class Hub:
         self.notes.clear()
         return f"[Since your last message, you did this in the interface:\n{done}]\n\n{message}"
 
+    async def save_conversation(self) -> None:
+        """Persist the current conversation's events to the database."""
+        if self.conversation_id is None:
+            return
+        conv_events = [e for e in self.history if is_conversation(e)]
+        message_count = sum(1 for e in conv_events if e.get("type") == "user_message")
+        if message_count == 0:
+            return
+        try:
+            await self.conversations.save(
+                self.conversation_id, self.conversation_title, conv_events, message_count)
+        except Exception:
+            log.warning("could not save conversation %s", self.conversation_id, exc_info=True)
+
     async def run(self, message: str) -> None:
         checkpoint = len(self.messages)
         held = list(self.notes)
+        if self.conversation_id is None:
+            self.conversation_id = _new_id()
+            self.conversation_title = title_from_message(message)
         await self.emit({"type": "user_message", "text": message})
         if self.refresh_context is not None:
             try:
@@ -199,8 +221,9 @@ class Hub:
                 await self.emit({"type": "turn_error", "error": plain, "detail": str(error)[:500], "settings": True})
             else:
                 await self.emit({"type": "turn_error", "error": str(error)[:500]})
+        await self.save_conversation()
 
-    async def clear_chat(self) -> int:
+    async def clear_chat(self, save: bool = True) -> int:
         """Forget the conversation: what the model remembers of it and what Chat shows. Returns how many
         messages it held.
 
@@ -208,9 +231,13 @@ class Hub:
         the next one, and a model with no conversation has no use for them. Memory (what the assistant
         knows about the user), finished-job notices, uploads and the audit log are not conversation and
         stay. The caller makes sure no turn is running: a turn holds an index into these messages."""
+        if save:  # not when the conversation is being deleted: saving would put it straight back
+            await self.save_conversation()
         cleared = len(self.messages)
         self.messages.clear()
         self.notes.clear()
+        self.conversation_id = None
+        self.conversation_title = ""
         kept = [event for event in self.history if not is_conversation(event)]
         self.history.clear()
         self.history.extend(kept)
@@ -258,6 +285,10 @@ class RecordDeletion(BaseModel):
     ids: list[str]
 
 
+class ConversationRename(BaseModel):
+    title: str
+
+
 class ActionRequest(BaseModel):
     tool: str
     arguments: dict[str, Any] = {}
@@ -300,6 +331,7 @@ def create_app(
     database = (Database(database_url, legacy_memory=memory_path, legacy_audit=audit_path)
                 if database_url else None)
     memory, audit = stores_for(database, memory_path, audit_path)
+    conversations = ConversationStore(database) if database else NullConversationStore()
     file_index = files.index_for(database, files_root)
     # What tools made that the suite keeps, under the tools' own labels (records.py, collect.py).
     records = records_for(database, files_root)
@@ -325,7 +357,8 @@ def create_app(
         # relaunched for every request.
         await registry.__aenter__()
         holder["hub"] = Hub(registry, config, context, audit,
-                            refresh_context=lambda: context_for(memory, lexicon_path))
+                            refresh_context=lambda: context_for(memory, lexicon_path),
+                            conversations=conversations)
         app.state.hub = holder["hub"]
         # What a tool made is taken into the store and the database: after a call that changed something, when
         # the watcher sees a job finish, and now, which the first time is the taking-in of what is already there.
@@ -402,7 +435,7 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(origins),
-        allow_methods=["GET", "POST", "PUT"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["content-type", "x-assistant-token", "ngrok-skip-browser-warning"],
         allow_credentials=True,
     )
@@ -537,6 +570,52 @@ def create_app(
         await audit.record(tool="assistant__clear_chat", arguments={}, outcome="ok",
                            result=f"{cleared} messages", origin="button")
         return {"cleared": cleared}
+
+    @app.get("/api/conversations")
+    async def list_conversations(limit: int = 50) -> list[dict[str, Any]]:
+        return await hub().conversations.list(max(1, min(limit, 200)))
+
+    @app.get("/api/conversations/current")
+    async def current_conversation() -> dict[str, Any]:
+        h = hub()
+        return {"id": h.conversation_id, "title": h.conversation_title}
+
+    @app.get("/api/conversations/{conversation_id}")
+    async def get_conversation(conversation_id: str) -> dict[str, Any]:
+        conv = await hub().conversations.get(conversation_id)
+        if conv is None:
+            raise HTTPException(404, "no such conversation")
+        return conv
+
+    @app.delete("/api/conversations/{conversation_id}")
+    async def delete_conversation(conversation_id: str) -> dict[str, Any]:
+        """Delete a kept conversation. The one Chat is in now leaves Chat too, as Clear chat does, and is refused
+        while a message in it is being worked on: left open, its next message saved it again, deleted messages and
+        old title and all (found in Chrome)."""
+        h = hub()
+        current = conversation_id == h.conversation_id
+        if current and (h.busy or h.pending):
+            raise HTTPException(409, "still working on a message in this conversation; delete it when it has finished")
+        kept = await h.conversations.get(conversation_id)
+        if kept is None or not await h.conversations.delete(conversation_id):
+            raise HTTPException(404, "no such conversation")
+        if current:
+            await h.clear_chat(save=False)
+        await audit.record(tool="assistant__delete_conversation", arguments={"id": conversation_id}, outcome="ok",
+                           result=f"{kept['title']!r}, {kept['message_count']} messages"
+                                  + ("; Chat cleared" if current else ""), origin="button")
+        return {"deleted": True, "cleared": current}
+
+    @app.patch("/api/conversations/{conversation_id}")
+    async def rename_conversation(conversation_id: str, body: ConversationRename) -> dict[str, Any]:
+        if not body.title.strip():
+            raise HTTPException(400, "empty title")
+        h = hub()
+        if not await h.conversations.rename(conversation_id, body.title.strip()):
+            raise HTTPException(404, "no such conversation")
+        if conversation_id == h.conversation_id:
+            h.conversation_title = body.title.strip()  # or the next save would put the old title back
+        return {"renamed": True}
 
     @app.post("/api/approvals/{approval_id}")
     async def answer(approval_id: str, body: ApprovalAnswer) -> dict[str, Any]:

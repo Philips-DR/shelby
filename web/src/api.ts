@@ -297,6 +297,40 @@ export const sendChat = (message: string) =>
 
 /** Delete the conversation (the model's memory of it and what Chat shows). Refused while a message is being worked on. */
 export const clearChat = () => request<{ cleared: number }>('/api/chat/clear', { method: 'POST' })
+
+// ---------------------------------------------------------------------------
+// Conversation history
+// ---------------------------------------------------------------------------
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  message_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Conversation extends ConversationSummary {
+  events: AssistantEvent[]
+}
+
+export const getConversations = (limit = 50) =>
+  request<ConversationSummary[]>(`/api/conversations?limit=${limit}`)
+
+export const getConversation = (id: string) =>
+  request<Conversation>(`/api/conversations/${encodeURIComponent(id)}`)
+
+export const deleteConversation = (id: string) =>
+  request<{ deleted: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+export const renameConversation = (id: string, title: string) =>
+  request<{ renamed: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+
+export const getCurrentConversation = () =>
+  request<{ id: string | null; title: string }>('/api/conversations/current')
 /** Stop the reply being worked on, at its next safe point: a tool already running finishes, nothing after it starts. */
 export const stopChat = () => request<{ stopping: boolean }>('/api/chat/stop', { method: 'POST' })
 
