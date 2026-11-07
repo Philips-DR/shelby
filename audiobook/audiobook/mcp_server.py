@@ -2,7 +2,7 @@
 
 Both doors sit directly on operations.py; neither wraps the other. Long work -- Docling reading
 a book, a render, cloning a voice -- starts as a background job and returns at once with an id;
-`job_status` is how anyone, a model or the suite's web app, watches it.
+`job_status` is how anyone, a model or Shelby's web app, watches it.
 
 Where jobs are kept is injected (AUDIOBOOK_JOBS), like the paths in the other tools' doors. The
 tool's own data (output/, voices/, .cache/) is relative to the folder it runs from, and ./mcp
@@ -328,16 +328,16 @@ def create_audiobook_server(paths: ServerPaths, speaker: Speaker | None = None) 
         except FAILURES as error:
             return _failed(error)
 
-    # The suite's two agreed names (its layer 1b): what is worth keeping, and letting go of it once kept. Neither is
+    # Shelby's two agreed names (its layer 1b): what is worth keeping, and letting go of it once kept. Neither is
     # for a conversation; keeping.py says what each hands over.
     @server.tool(
         name="inventory",
         title="What there is to keep",
         description=(
-            "For the suite, not for answering a person: every finished file and record this tool holds that is "
+            "For Shelby, not for answering a person: every finished file and record this tool holds that is "
             "worth keeping -- chapter audio with the exact text it speaks, whole-book M4Bs, voice samples, voices, "
-            "corrections, finished jobs -- each labelled (book, chapter number and title, speed, voice). The suite "
-            "files them in its own store. To say what has been rendered, ask the suite what it keeps. Reads only."
+            "corrections, finished jobs -- each labelled (book, chapter number and title, speed, voice). Shelby "
+            "files them in its own store. To say what has been rendered, ask Shelby what it keeps. Reads only."
         ),
         annotations=READ,
     )
@@ -349,10 +349,10 @@ def create_audiobook_server(paths: ServerPaths, speaker: Speaker | None = None) 
 
     @server.tool(
         name="release",
-        title="Let go of audio the suite has kept",
+        title="Let go of audio Shelby has kept",
         description=(
-            "For the suite only, never because a person asked: delete this tool's working copies of finished audio "
-            "the suite has already filed, each named by its path and the SHA-256 of the copy filed. Anything whose "
+            "For Shelby only, never because a person asked: delete this tool's working copies of finished audio "
+            "Shelby has already filed, each named by its path and the SHA-256 of the copy filed. Anything whose "
             "hash differs, or that is not finished audio in this tool's output folder, is kept and said so. To "
             "delete a book's audio, a person uses the Audiobooks page."
         ),

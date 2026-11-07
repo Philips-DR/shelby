@@ -18,7 +18,7 @@ work. When they disagree, fix whichever is wrong — don't let them drift.
 | PDF understanding | **Docling** (IBM, MIT) | Layout model gives real reading order and labels every element (heading, paragraph, list item, table, formula, caption, page header/footer). Hand-written PyMuPDF heuristics could not do this reliably — see §2. |
 | Runtime | Python 3.14 venv at `.venv/`, CPU-only PyTorch | No usable GPU (Intel UHD 620 + AMD WX 3200, unsupported by PyTorch). |
 | Output | One MP3 per chapter + optional single `.m4b` with chapter markers | MP3 plays anywhere; M4B is the audiobook-app standard. |
-| Interface | CLI and MCP door; **no UI of its own** | The standalone web app (M7) was removed on 2026-10-10 and its features live in the suite's Audiobooks panel (M8). |
+| Interface | CLI and MCP door; **no UI of its own** | The standalone web app (M7) was removed on 2026-10-10 and its features live in Shelby's Audiobooks panel (M8). |
 
 ## 2. What we learned (evidence, 2026-09-29)
 
@@ -234,7 +234,7 @@ Each ends with something the user can run and judge.
 | M5 | Full-length run | ✅ Done (2026-09-30): *The Final Quest*, 6 chapters, 4 h 07 min at 0.95×, one MP3 per part + M4B with chapter markers. Rendered across several runs (stopped and resumed; cached chunks reused). Parts II–V took ~2 h 10 min. |
 | M6 | Scanned-PDF support (OCR) | ✅ Done (2026-09-30): no text layer → Docling re-run with RapidOCR (torch backend); 98% word accuracy on a test scan. |
 | M7 | Web UI | ✅ Done (2026-09-30): `serve` — FastAPI + one-page UI: library/upload, chapter table, exact text, corrections editor, voice samples and cloning (with consent box), render with progress/time left, in-page players and downloads. One job at a time. **Superseded 2026-10-10 by M8: the app and `serve` were removed.** |
-| M8 | Joined the suite | ✅ Done (2026-10-10): merged with history into `suite/audiobook/`; own `.venv`; MCP door (12 tools) over `operations.py`; analysis, render and voice work as detached background jobs that survive a backend restart; every M7 feature rebuilt as the suite web app's Audiobooks panel (PDF and recording uploads, file playback and download through the assistant). See CLAUDE.md, "The suite integration". |
+| M8 | Joined Shelby | ✅ Done (2026-10-10): merged with history into `shelby/audiobook/`; own `.venv`; MCP door (12 tools) over `operations.py`; analysis, render and voice work as detached background jobs that survive a backend restart; every M7 feature rebuilt as Shelby web app's Audiobooks panel (PDF and recording uploads, file playback and download through the assistant). See CLAUDE.md, "Shelby integration". |
 
 ## 8. Risks
 

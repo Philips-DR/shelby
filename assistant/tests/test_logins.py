@@ -365,7 +365,7 @@ def test_a_model_the_key_cannot_use_names_what_it_can(monkeypatch):
     found = key_status(monkeypatch, retrieve_raises="NotFoundError", listed=["claude-opus-5-5", "claude-sonnet-5-5"])
     assert found["level"] == "error" and found["model_missing"] is True and not found.get("key_refused")
     assert found["available"] == ["claude-opus-5-5", "claude-sonnet-5-5"]
-    assert "SUITE_MODEL" in found["hint"]
+    assert "SHELBY_MODEL" in found["hint"]
 
 
 def test_the_model_list_failing_does_not_hide_that_the_model_is_missing(monkeypatch):
@@ -411,12 +411,12 @@ def test_the_model_can_be_named_in_the_environment(monkeypatch):
     from assistant.config import model_config_from_environment
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ASSISTANT_MODEL", raising=False)
-    monkeypatch.setenv("SUITE_MODEL", "claude-sonnet-5-5")
+    monkeypatch.setenv("SHELBY_MODEL", "claude-sonnet-5-5")
     assert model_config_from_environment().model == "claude-sonnet-5-5"
     monkeypatch.setenv("ASSISTANT_MODEL", "claude-opus-5-5")
     assert model_config_from_environment().model == "claude-opus-5-5"  # the assistant's own line wins
     assert model_config_from_environment(model="explicit").model == "explicit"  # and a flag beats both
-    monkeypatch.delenv("SUITE_MODEL")
+    monkeypatch.delenv("SHELBY_MODEL")
     monkeypatch.delenv("ASSISTANT_MODEL")
     assert model_config_from_environment().model is None
 

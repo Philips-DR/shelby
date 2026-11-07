@@ -67,7 +67,7 @@ export interface PreviewResult {
 /**
  * Parse + plan only — no network, no API quota spent, nothing created.
  *
- * Every tool in this suite owes a preview: it is what turns human-in-the-loop from a convention
+ * Every tool in Shelby owes a preview: it is what turns human-in-the-loop from a convention
  * somebody has to remember into a property of the tool. It is also the only operation here that
  * takes no AuthProvider, and that is the whole idea.
  */

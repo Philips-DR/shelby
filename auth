@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Every login the suite depends on, in one command:
+# Every login Shelby depends on, in one command:
 #
 #   aws           the model, through Bedrock (AWS SSO; lapses overnight) -- unless ANTHROPIC_API_KEY is set
 #   anthropic     the model, through an Anthropic API key (checked, never renewed here: replace it in .env)

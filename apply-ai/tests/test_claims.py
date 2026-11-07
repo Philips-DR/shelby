@@ -251,13 +251,13 @@ def test_a_private_claim_that_is_not_about_code_is_left_alone():
     # "code-switched" is not code, and client data is not a repository.
     for draft in ("- Fine-tuned Whisper on private, code-switched farmer speech.",
                   "- Kept client survey data confidential."):
-        assert private_findings(draft, ["https://github.com/Philips-DR/suite"]) == [], draft
+        assert private_findings(draft, ["https://github.com/Philips-DR/shelby"]) == [], draft
         assert private_findings(draft, None) == [], draft
 
 
 def test_an_address_in_the_sentence_found_public_is_named_whatever_its_host():
     found = private_findings("- My portfolio, philip-portfolio-five.vercel.app, is private.",
-                             ["https://philip-portfolio-five.vercel.app/", "https://github.com/Philips-DR/suite"])
+                             ["https://philip-portfolio-five.vercel.app/", "https://github.com/Philips-DR/shelby"])
     assert len(found) == 1 and "vercel.app" in found[0].why and "github.com" not in found[0].why
 
 
@@ -272,21 +272,21 @@ def test_one_address_written_two_ways_is_one_address():
 def test_the_public_addresses_shown_are_the_ones_the_draft_links_to():
     draft = ("- Voice AI survey platform: [github.com/Philips-DR/voice-ai-survey-platform]"
              "(https://github.com/Philips-DR/voice-ai-survey-platform)\n" + PRIVATE)
-    found = private_findings(draft, ["https://github.com/Philips-DR/suite",
+    found = private_findings(draft, ["https://github.com/Philips-DR/shelby",
                                      "https://github.com/Philips-DR/voice-ai-survey-platform"])
-    assert len(found) == 1 and "voice-ai-survey-platform" in found[0].why and "/suite" not in found[0].why
+    assert len(found) == 1 and "voice-ai-survey-platform" in found[0].why and "/shelby" not in found[0].why
 
 
 def test_a_linked_repository_outranks_ones_only_under_a_linked_account():
     # The real CV links the account in its header and two repositories in its projects.
-    names = ("suite", "audiobook", "assistant", "meet-ai", "mail-ai", "voice-ai-survey-platform")
+    names = ("shelby", "audiobook", "assistant", "meet-ai", "mail-ai", "voice-ai-survey-platform")
     public = [f"https://github.com/Philips-DR/{n}" for n in names]
     header = "GitHub: [github.com/Philips-DR](https://github.com/Philips-DR)\n"
     why = private_findings(header + "- Survey platform: github.com/Philips-DR/voice-ai-survey-platform\n" + PRIVATE,
                            public)[0].why
-    assert "voice-ai-survey-platform" in why and "/suite" not in why
+    assert "voice-ai-survey-platform" in why and "/shelby" not in why
     # With only the account linked, its repositories are what is shown.
-    assert "/suite" in private_findings(header + PRIVATE, public)[0].why
+    assert "/shelby" in private_findings(header + PRIVATE, public)[0].why
 
 
 def test_a_list_that_arrives_as_one_string_is_still_a_list():
@@ -302,7 +302,7 @@ def test_a_public_account_page_says_nothing_about_its_repositories():
     # Naming the account itself as private is contradicted by it, and naming the account covers its repositories.
     assert len(private_findings("- My GitHub, github.com/Philips-DR, is private.", ["https://github.com/Philips-DR"])) == 1
     assert len(private_findings("- My code at github.com/Philips-DR is private.",
-                                ["https://github.com/Philips-DR/suite"])) == 1
+                                ["https://github.com/Philips-DR/shelby"])) == 1
 
 
 def test_a_draft_that_says_has_not_been_deployed_is_not_claiming_production():

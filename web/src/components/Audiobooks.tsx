@@ -325,7 +325,7 @@ function JobCard({ job, name, samples, reload, openBook }: {
   job: BookJob | null
   /** The book's title as the library knows it, for a job from before jobs carried one. */
   name?: string
-  /** The voice samples there are: a finished sample job's file, once the suite has taken it, is played from there. */
+  /** The voice samples there are: a finished sample job's file, once Shelby has taken it, is played from there. */
   samples: AudioEntry[]
   reload: () => Promise<void>
   /** Open the job's book; absent while that book is the one open. */
@@ -440,7 +440,7 @@ interface Shelf {
   audio: AudioBook | null
 }
 
-/** A book to delete, as the library names it: its upload, how many audio files it has, and which of them the suite
+/** A book to delete, as the library names it: its upload, how many audio files it has, and which of them Shelby
  *  keeps (by record id). */
 interface Doomed { stem: string; title: string; upload: { id: string; name: string; bytes: number } | null; audio: number; kept: string[] }
 
@@ -454,7 +454,7 @@ function DeleteBook({ book, onCancel, onChanged, onDone }: {
   onDone: () => void
 }) {
   // What the tool's own folder still holds for the book (working files, and audio not yet handed over), or null
-  // while asking. Once the suite keeps a book's audio the folder is often gone, and then there is nothing to show.
+  // while asking. Once Shelby keeps a book's audio the folder is often gone, and then there is nothing to show.
   const [summary, setSummary] = useState<string | null>(null)
   const [folder, setFolder] = useState(false)
   const [keepAudio, setKeepAudio] = useState(false)
@@ -475,7 +475,7 @@ function DeleteBook({ book, onCancel, onChanged, onDone }: {
     setBusy(true)
     setError('')
     // Kept audio keeps its folder; otherwise the audio goes -- the tool's folder, with the working files a reading
-    // leaves in it, and what the suite keeps.
+    // leaves in it, and what Shelby keeps.
     if (!(book.upload && keepAudio && book.audio > 0)) {
       try {
         // The tool first: it refuses while the book is being read or rendered, and then nothing may go.
@@ -822,7 +822,7 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
 
 function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, reloadJob, onBack, onDelete }: {
   pdf: string
-  /** What the suite keeps of this tool's work: the chapters' audio once a render has handed it over. */
+  /** What Shelby keeps of this tool's work: the chapters' audio once a render has handed it over. */
   kept: Kept[]
   /** Just uploaded: start reading it as soon as it is open, if nothing else is running. */
   readNow: boolean
@@ -1367,7 +1367,7 @@ export function Audiobooks() {
   const uploads = usePoll(getUploads, 30000)
   const status = usePoll(() => call<{ job: BookJob | null }>('audiobook__job_status'), 3000)
   const voiceList = usePoll(() => call<{ voices: Voice[] }>('audiobook__list_voices'), 30000)
-  // Finished audio is the suite's to keep (assistant/collect.py): the tool lists only what it has not yet handed over.
+  // Finished audio is Shelby's to keep (assistant/collect.py): the tool lists only what it has not yet handed over.
   const finished = usePoll(() => call<{ audiobooks: AudioBook[] }>('audiobook__list_audiobooks'), 30000)
   const keptPoll = usePoll(() => getKept('audiobook'), 30000)
   const job = status.data?.job ?? null

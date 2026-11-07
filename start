@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The whole suite, as one command. It checks every login and renews the dead ones, then starts the
+# All of Shelby, as one command. It checks every login and renews the dead ones, then starts the
 # containers (./start-docker up): the backend with every tool, the web app, and the database.
 #
 #   ./start               then open http://127.0.0.1:8751/
@@ -7,7 +7,7 @@
 #   ./start --tailscale   also join your tailnet (see README.md -> In containers)
 #
 # Anything after ./start goes to ./start-docker up unchanged. The containers keep running (and come
-# back after a reboot) until ./start-docker down. There is no host-only way to run the suite any more:
+# back after a reboot) until ./start-docker down. There is no host-only way to run Shelby any more:
 # the database it keeps its memory in is a container, so there is one way and it is this one.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"

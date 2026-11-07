@@ -1,4 +1,4 @@
-"""What tools made that the suite keeps (layer 1b of ../../plan.md; shape A, the user's choice of 2026-11-01).
+"""What tools made that Shelby keeps (layer 1b of ../../plan.md; shape A, the user's choice of 2026-11-01).
 
 A tool labels each thing it made that is worth keeping -- its kind, its key, labels, its text and its files -- and
 the assistant files it here under those labels, without knowing what any of it is: no domain logic, as everywhere
@@ -194,7 +194,7 @@ def kept_tools(records: RecordStore, index: Any) -> list:
     return [LocalTool(
         name="list_kept",
         description=(
-            "What a tool made that the suite keeps, under the labels the tool gave it: for audiobook, every rendered "
+            "What a tool made that Shelby keeps, under the labels the tool gave it: for audiobook, every rendered "
             "chapter (kind 'chapter': book, number, title, speed), whole-book M4Bs ('audiobook'), voice samples "
             "('sample'), voices ('voice'), books' titles and authors ('book'), corrections, finished jobs and loose early tests ('other'). Finished audio is "
             "kept here, not by the "

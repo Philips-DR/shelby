@@ -1,6 +1,6 @@
 """Tests for the send gate.
 
-This is the only part of the suite where being wrong puts words in someone else's inbox, so
+This is the only part of Shelby where being wrong puts words in someone else's inbox, so
 the tests are about what must NOT happen: sending without review, sending something that
 changed after review, and any path that composes and sends in one step.
 """

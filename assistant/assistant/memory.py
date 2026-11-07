@@ -1,4 +1,4 @@
-"""What the assistant knows about you, and the only genuinely stateful thing in the suite.
+"""What the assistant knows about you, and the only genuinely stateful thing in Shelby.
 
 Two stores behind one interface: a small, human-editable JSON file (what the tests and a bare checkout
 use) and a PostgreSQL table (what the containers use, chosen by DATABASE_URL). Retrieval is still not a

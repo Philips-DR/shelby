@@ -5,7 +5,7 @@
 # something a container boundary should quietly change. The web app is a different image
 # (web.Dockerfile): the two stay separate programs.
 #
-# Built from the suite's root:  docker build -f docker/backend.Dockerfile .   (or compose)
+# Built from Shelby's root:  docker build -f docker/backend.Dockerfile .   (or compose)
 
 ARG PYTHON=3.14-slim
 ARG NODE=24-slim
@@ -19,7 +19,7 @@ FROM python:${PYTHON} AS python
 # from the host, the rest from these packages.
 ARG GPU=cpu
 
-# --- the suite's shared Python environment (assistant, meet-ai, mail-ai, apply-ai, web-ai) -----------------
+# --- Shelby's shared Python environment (assistant, meet-ai, mail-ai, apply-ai, web-ai) -----------------
 # Built at the path it will run from, since a venv's scripts name their own location.
 FROM python AS shared-venv
 ARG GPU
@@ -73,17 +73,17 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 # Not root, and the same numbers as the person who owns ./data, so what the tools write there
 # is theirs to read and move.
-ARG SUITE_UID=1000
-ARG SUITE_GID=1000
-RUN groupadd --gid ${SUITE_GID} suite \
- && useradd --create-home --uid ${SUITE_UID} --gid ${SUITE_GID} --shell /bin/bash suite
+ARG SHELBY_UID=1000
+ARG SHELBY_GID=1000
+RUN groupadd --gid ${SHELBY_GID} shelby \
+ && useradd --create-home --uid ${SHELBY_UID} --gid ${SHELBY_GID} --shell /bin/bash shelby
 
 WORKDIR /app
 COPY --from=shared-venv /app/.venv /app/.venv
 COPY --from=audiobook-venv /app/audiobook/.venv /app/audiobook/.venv
 COPY . /app
 # Owned by the user it runs as: vitest keeps its cache inside node_modules.
-COPY --chown=suite:suite --from=docu-ai-deps /app/docu-ai/node_modules /app/docu-ai/node_modules
+COPY --chown=shelby:shelby --from=docu-ai-deps /app/docu-ai/node_modules /app/docu-ai/node_modules
 
 # meet-ai's speaker models (~37 MB). Whisper's and Pocket TTS's are fetched on first use into the
 # data volume (HF_HOME), so they are downloaded once, not once per image build.
@@ -95,12 +95,12 @@ RUN meet-ai/fetch-models.sh
 RUN mkdir -p /data \
  && for d in voices voice output .cache; do ln -s "/data/audiobook/${d#.}" "/app/audiobook/$d"; done \
  && ln -s /data/audiobook/.env /app/audiobook/.env \
- && chown -R suite:suite /data /app/meet-ai/models
+ && chown -R shelby:shelby /data /app/meet-ai/models
 
-ENV HOME=/home/suite \
+ENV HOME=/home/shelby \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
-USER suite
+USER shelby
 EXPOSE 8750
-# The backend's own launcher: it finds the suite's .venv, and it launches every tool as a child.
+# The backend's own launcher: it finds Shelby's .venv, and it launches every tool as a child.
 CMD ["/app/assistant/assistant-web"]

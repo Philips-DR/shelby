@@ -1,4 +1,4 @@
-# suite
+# Shelby
 
 An assistant and the tools it runs, in one folder, started with one command.
 
@@ -86,30 +86,30 @@ asks once for the token the backend prints.
 
 ## When you power on the laptop
 
-**There is nothing to start.** Docker itself starts at boot and brings the suite back with it: every
+**There is nothing to start.** Docker itself starts at boot and brings Shelby back with it: every
 container (database, backend, web, and Tailscale if you use it) is set to
 `restart: unless-stopped`, so they return unless you stopped them yourself with `./start-docker down`.
 They come back with the same access token, so a tab or phone that already had the page open keeps
-working. Give it a minute after logging in, then open `http://127.0.0.1:8751/` (or the `suite…ts.net`
+working. Give it a minute after logging in, then open `http://127.0.0.1:8751/` (or the `shelby…ts.net`
 address from your phone).
 
 1. Check once that Docker starts at boot: `systemctl is-enabled docker` should print `enabled`
    (if not, `sudo systemctl enable docker`).
 2. **The model**: put an `ANTHROPIC_API_KEY` in `.env` and run `./start-docker up`: no daily login, and it wins over
    Bedrock when both are set. Settings asks Anthropic whether the key, and the model it will use, are accepted, and says
-   what to change if not (`SUITE_MODEL` in `.env` names another model). Only Chat and meeting notes need a model; every
+   what to change if not (`SHELBY_MODEL` in `.env` names another model). Only Chat and meeting notes need a model; every
    other page works without one. **With Bedrock instead, renew the AWS login each morning**: it lapses overnight, and
    until then the assistant cannot think (Settings shows "Signed out"). Run `./auth`, or just
    `aws sso login --profile ayadata-bedrock`. The Google logins last about a week.
 3. If it is not there: `./start-docker status` shows what is running; `./start-docker up` starts it.
 
 **It is only reachable while the laptop is awake.** A laptop that sleeps (lid closed, idle) is off the
-network, so your phone cannot reach the suite until it wakes. For all-day access from your phone, keep it
+network, so your phone cannot reach Shelby until it wakes. For all-day access from your phone, keep it
 awake and plugged in (set the laptop not to suspend while on AC power).
 
 ## In containers, and from your phone
 
-The same suite runs in Docker, which is also how it reaches your phone and other computers.
+Shelby runs in Docker, which is also how it reaches your phone and other computers.
 
 ```bash
 ./start-docker up              # build, start, say where it is: http://127.0.0.1:8751/
@@ -127,23 +127,23 @@ this computer's microphone.
 (Docling) run on the card, found by itself: `./setup` and `./start-docker up` see the card's driver and
 install NVIDIA's builds of their libraries (about 4 GB more to download). The containers also need the
 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html);
-`./start-docker up` says so when it is missing, and runs on the CPU until then. `SUITE_GPU=cpu` in `.env`
+`./start-docker up` says so when it is missing, and runs on the CPU until then. `SHELBY_GPU=cpu` in `.env`
 keeps everything on the CPU. Any other computer runs on the CPU, as before.
 
 **From your phone or another computer, over Tailscale.** Tailscale is a private network between
-your own devices: only devices signed in to your account can reach the suite, and to everyone else
+your own devices: only devices signed in to your account can reach Shelby, and to everyone else
 it does not exist.
 
 1. Make a free Tailscale account (tailscale.com) and install the app on each device you want to
-   reach the suite *from* — your phone, other computers — signed in to that account. This computer
-   does not need it: the suite's own Tailscale container joins your network as a machine called
-   `suite`. In the admin console (login.tailscale.com/admin → DNS), make sure **MagicDNS** is on and
+   reach Shelby *from* — your phone, other computers — signed in to that account. This computer
+   does not need it: Shelby's own Tailscale container joins your network as a machine called
+   `shelby`. In the admin console (login.tailscale.com/admin → DNS), make sure **MagicDNS** is on and
    enable **HTTPS Certificates**.
 2. `./start-docker up --tailscale`. The first time, `./start-docker logs tailscale` prints a
-   sign-in link for the new `suite` machine (or put a `TS_AUTHKEY` in `.env` and nothing is asked).
-3. The admin console now lists `suite` with a name like `suite.tail1234.ts.net`. Put it in `.env` as
-   `SUITE_HOST=suite.tail1234.ts.net` and run `./start-docker up --tailscale` again.
-4. On your phone, with Tailscale on: open `https://suite.tail1234.ts.net/`.
+   sign-in link for the new `shelby` machine (or put a `TS_AUTHKEY` in `.env` and nothing is asked).
+3. The admin console now lists `shelby` with a name like `shelby.tail1234.ts.net`. Put it in `.env` as
+   `SHELBY_HOST=shelby.tail1234.ts.net` and run `./start-docker up --tailscale` again.
+4. On your phone, with Tailscale on: open `https://shelby.tail1234.ts.net/`.
 
 If it does not open, run `./start-docker tailscale`: it shows the machine's name, whether HTTPS
 certificates are on, and what is being served, and says what to change. (The usual cause is step 1's
@@ -167,14 +167,14 @@ go on ssh's standard input, never in a command line.
 For a server reached through SSM, give it an alias in `~/.ssh/config`:
 
 ```
-Host suite-server
+Host shelby-server
   HostName i-0123456789abcdef0            # the instance id
   User ubuntu                             # or ec2-user
   IdentityFile ~/.ssh/<key>
   ProxyCommand sh -c "AWS_PROFILE=<a profile allowed to start sessions> AWS_REGION=us-east-1 aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'"
 ```
 
-Then `SUITE_REMOTE=suite-server` in `.env` (and `SUITE_REMOTE_DIR`, `SUITE_REMOTE_AWS_DIR`; see
+Then `SHELBY_REMOTE=shelby-server` in `.env` (and `SHELBY_REMOTE_DIR`, `SHELBY_REMOTE_AWS_DIR`; see
 `.env.example`), and on the server set `AWS_CONFIG_DIR` in its `.env` to the full path of the AWS
 credentials folder, so `~/.aws` there is never touched.
 

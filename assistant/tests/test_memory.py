@@ -1,6 +1,6 @@
 """Tests for memory and the built-in tools.
 
-Memory is the only stateful thing in the suite, so the tests that matter are the ones about
+Memory is the only stateful thing in Shelby, so the tests that matter are the ones about
 not losing or corrupting it -- and about failing soft, since a broken memory file must
 degrade what the assistant knows rather than whether it runs.
 """

@@ -1,4 +1,4 @@
-# The suite in containers. Use ./start-docker, which makes the access token and the data folders
+# Shelby in containers. Use ./start-docker, which makes the access token and the data folders
 # and then runs this; see README.md ("In containers").
 #
 #   postgres   the assistant's memory, audit log and sign-in sessions; reached only by the backend
@@ -9,7 +9,7 @@
 #
 # Nothing here is published beyond 127.0.0.1. Reaching it from elsewhere is Tailscale's job, which
 # opens it to the devices you have signed in and to nobody else.
-name: suite
+name: shelby
 
 x-service: &service
   restart: unless-stopped
@@ -23,17 +23,17 @@ services:
     image: postgres:16-alpine
     # Runs as you, like the backend, so ./data/postgres is yours to read, move and back up rather than
     # Docker's. The image needs the user to exist in /etc/passwd, which the read-only mount provides.
-    user: "${SUITE_UID:-1000}:${SUITE_GID:-1000}"
+    user: "${SHELBY_UID:-1000}:${SHELBY_GID:-1000}"
     environment:
-      POSTGRES_USER: suite
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-suite}
-      POSTGRES_DB: suite
+      POSTGRES_USER: shelby
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shelby}
+      POSTGRES_DB: shelby
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
       - /etc/passwd:/etc/passwd:ro
     # No ports: only the backend, on this network, can reach it.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U suite -d suite"]
+      test: ["CMD-SHELL", "pg_isready -U shelby -d shelby"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -44,9 +44,9 @@ services:
       context: .
       dockerfile: docker/backend.Dockerfile
       args:
-        SUITE_UID: ${SUITE_UID:-1000}
-        SUITE_GID: ${SUITE_GID:-1000}
-    image: suite-backend
+        SHELBY_UID: ${SHELBY_UID:-1000}
+        SHELBY_GID: ${SHELBY_GID:-1000}
+    image: shelby-backend
     env_file:
       - path: .env
         required: false               # AWS_PROFILE and AWS_REGION, as on the host
@@ -57,12 +57,12 @@ services:
       ASSISTANT_HOST: 0.0.0.0
       ASSISTANT_PORT: 8750
       ASSISTANT_TOKEN: ${ASSISTANT_TOKEN:?run ./start-docker, which makes the token, or set ASSISTANT_TOKEN}
-      ASSISTANT_HOSTS: ${ASSISTANT_HOSTS:-${SUITE_HOST:-suite.invalid},backend}
-      ASSISTANT_ORIGINS: ${ASSISTANT_ORIGINS:-http://127.0.0.1:8751,http://localhost:8751,https://${SUITE_HOST:-suite.invalid}}
+      ASSISTANT_HOSTS: ${ASSISTANT_HOSTS:-${SHELBY_HOST:-shelby.invalid},backend}
+      ASSISTANT_ORIGINS: ${ASSISTANT_ORIGINS:-http://127.0.0.1:8751,http://localhost:8751,https://${SHELBY_HOST:-shelby.invalid}}
       # Memory, the audit log and sign-in sessions live in the database. The two files below are what they
       # used to be: imported into it once, on the first start that finds them (and renamed .imported), and
       # the lexicon is still written beside the first of them for the tools to read.
-      DATABASE_URL: postgres://suite:${POSTGRES_PASSWORD:-suite}@postgres:5432/suite
+      DATABASE_URL: postgres://shelby:${POSTGRES_PASSWORD:-shelby}@postgres:5432/shelby
       # Where each tool keeps what it keeps: all under the one volume.
       ASSISTANT_MEMORY: /data/assistant/memory.json
       ASSISTANT_AUDIT: /data/assistant/audit.jsonl
@@ -84,7 +84,7 @@ services:
       HF_HOME: /data/cache/huggingface     # Whisper's and Pocket TTS's models, downloaded once
     volumes:
       - ./data:/data
-      - ${AWS_CONFIG_DIR:-${HOME}/.aws}:/home/suite/.aws   # the model's login; renew it on the host
+      - ${AWS_CONFIG_DIR:-${HOME}/.aws}:/home/shelby/.aws   # the model's login; renew it on the host
     ports:
       - "127.0.0.1:8750:8750"
     depends_on:
@@ -102,11 +102,11 @@ services:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
-    image: suite-web
+    image: shelby-web
     environment:
       WEB_HOST: 0.0.0.0
       ASSISTANT_TOKEN: ${ASSISTANT_TOKEN:?run ./start-docker, which makes the token, or set ASSISTANT_TOKEN}
-      ASSISTANT_HOSTS: ${ASSISTANT_HOSTS:-${SUITE_HOST:-suite.invalid},web}
+      ASSISTANT_HOSTS: ${ASSISTANT_HOSTS:-${SHELBY_HOST:-shelby.invalid},web}
       # Opened by any name but localhost, the page looks for the backend on that same host at this port
       # (Tailscale), or at a full URL (ngrok, where each tunnel has its own hostname).
       ASSISTANT_REMOTE_API_PORT: ${ASSISTANT_REMOTE_API_PORT:-8443}
@@ -124,7 +124,7 @@ services:
     profiles: ["tailscale"]
     image: tailscale/tailscale:stable
     restart: unless-stopped
-    hostname: ${TS_HOSTNAME:-suite}
+    hostname: ${TS_HOSTNAME:-shelby}
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}      # empty: it prints a sign-in link in its log, once
       TS_STATE_DIR: /var/lib/tailscale

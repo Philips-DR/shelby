@@ -78,7 +78,7 @@ def test_a_tool_is_not_started_with_the_database_address(monkeypatch):
     memory, which no tool may."""
     from assistant.tools import tool_environment
 
-    monkeypatch.setenv("DATABASE_URL", "postgres://suite:secret@postgres:5432/suite")
+    monkeypatch.setenv("DATABASE_URL", "postgres://shelby:secret@postgres:5432/shelby")
     monkeypatch.setenv("MEET_AI_AUDIO", "/data/meet-ai/audio")
     env = tool_environment({"MAIL_AI_STORE": "/data/mail-ai/mailbox.sqlite3"})
     assert "DATABASE_URL" not in env

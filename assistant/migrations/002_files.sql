@@ -1,4 +1,4 @@
--- Every file the suite keeps, in one store (layer 1b of plan.md). The file itself is at
+-- Every file Shelby keeps, in one store (layer 1b of plan.md). The file itself is at
 -- <files root>/<id>/<name>, a folder named by an id that says nothing about whose it is; this row is its
 -- record. Who owns a file is user_id, never a folder name.
 --

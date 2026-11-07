@@ -1,4 +1,4 @@
-# suite — rules for the whole folder
+# Shelby — rules for the whole folder
 
 **Start here: `plan.md`** holds the current state — what is built, what is rough, what is waiting
 on the user, and the next steps. This file holds the rules. Read both before changing anything.
@@ -37,11 +37,11 @@ module or a credential**, and keeping it that way is the point of the whole rebu
 - **A crash or a hang stays inside one tool.** docu-ai is TypeScript and could not share a Python
   process anyway; transcription pins every core for hours and must survive a server restart.
 - **Credentials stay with their tool** (`~/.config/docu-ai`, `~/.config/mail-ai`, and audiobook's
-  Hugging Face token in `audiobook/.env`, which is not the suite's `.env`). The assistant
+  Hugging Face token in `audiobook/.env`, which is not Shelby's `.env`). The assistant
   holds only its own model login, and reads a tool's health from how its calls went, never from
   its token files.
 - **Every tool still runs alone.** Its wrappers use the tool's own `.venv` if it has one, and
-  the suite's `../.venv` otherwise (audiobook has no such fallback: it needs its own) — so a tool
+  Shelby's `../.venv` otherwise (audiobook has no such fallback: it needs its own) — so a tool
   checked out by itself works unchanged.
 
 ## The shared Python environment
@@ -52,14 +52,14 @@ assistant, meet-ai, mail-ai, apply-ai and web-ai share `.venv`. `./setup` instal
 TTS are 1.9 GB that nothing else uses (the shared one is 696 MB) and torch must come from PyTorch's
 CPU index, not PyPI's CUDA build. It was the weight and the index, not a version conflict — they
 shared only fastapi, uvicorn, starlette, numpy, pydantic and huggingface_hub, at patch-level
-differences. `audiobook/mcp` prefers its own `.venv` and does not fall back to the suite's.
+differences. `audiobook/mcp` prefers its own `.venv` and does not fall back to Shelby's.
 
 **A pin that conflicts across tools is a
 decision, not a merge accident**: if two tools need different versions of one package, the
 answer is that tool getting its own `.venv` again (its wrappers already prefer one), never a
 loosened pin.
 
-Measured when the suite was formed (2026-09-27): the three tools pinned only `anthropic` in
+Measured when Shelby was formed (2026-09-27): the three tools pinned only `anthropic` in
 common, at the same version; installed transitive deps differed only by patch (`idna`,
 `protobuf`). 696 MB shared versus ~900 MB across three environments.
 
@@ -106,7 +106,7 @@ habits that came out of building it:
 
 ## In containers (`start-docker`, `compose.yaml`, `docker/`)
 
-The suite also runs in Docker, which is how it is reached from a phone or another computer (Tailscale;
+Shelby also runs in Docker, which is how it is reached from a phone or another computer (Tailscale;
 `README.md` has the steps). The rules:
 
 - **One backend image holds the backend and every tool; the web app is a second image.** The tools are
@@ -115,14 +115,14 @@ The suite also runs in Docker, which is how it is reached from a phone or anothe
   detached renders and transcriptions are reparented to PID 1, which must reap them.
 - **An NVIDIA card is used when there is one, and only then (2026-10-31).** `./start-docker` adds
   `compose.nvidia.yaml` (the image built with `GPU=nvidia`, the card handed to the backend) when `nvidia-smi`
-  answers and Docker has NVIDIA's runtime; a card Docker cannot reach is said once and the suite runs on the
-  CPU. `./setup` decides the same way for the host's environments. `SUITE_GPU=cpu|nvidia` overrides both. The
+  answers and Docker has NVIDIA's runtime; a card Docker cannot reach is said once and Shelby runs on the
+  CPU. `./setup` decides the same way for the host's environments. `SHELBY_GPU=cpu|nvidia` overrides both. The
   image carries no CUDA of its own: the driver is the host's, the rest pip packages (`meet-ai` and `audiobook`
   `requirements-nvidia.txt`), and the code picks the device at run time, so a CPU machine's image and
   behaviour are what they were. Never run on a GPU here (the laptop has none PyTorch can use): the package
   sets were resolved, the detection was run against stand-ins, and the CPU path was run for real.
 - **All state is in `./data`** (git-ignored, owned by you, not by Docker's root): each tool's path comes
-  from an environment variable in `compose.yaml`, which is the suite's own rule that paths are injected.
+  from an environment variable in `compose.yaml`, which is Shelby's own rule that paths are injected.
   audiobook is the exception, because it reads no setting for where its folders are, so the image
   symlinks `voices`, `output`, `.cache` and `.env` into `/data/audiobook`. `start-docker import` copies
   what the host folders already hold, once, never overwriting.
@@ -133,7 +133,7 @@ The suite also runs in Docker, which is how it is reached from a phone or anothe
   the container network only (`ASSISTANT_HOST`, `WEB_HOST`). That is the one deliberate relaxation of
   "bind to localhost"; the token and the Host check still apply to everything. Reaching it from
   elsewhere is the Tailscale sidecar's job (`--tailscale`), not a published port's.
-- **Hosts are exact names** (`ASSISTANT_HOSTS`, shared by both programs; `SUITE_HOST` in `.env`), never a
+- **Hosts are exact names** (`ASSISTANT_HOSTS`, shared by both programs; `SHELBY_HOST` in `.env`), never a
   pattern or `*`: the Host check is what stops a hostile page pointing its own name at this machine.
 - **No source is mounted over the image.** A change to the code is live after `./start-docker up`
   (layer-cached, so only what changed is rebuilt). The images hold no credentials; they come in as the
@@ -146,7 +146,7 @@ The suite also runs in Docker, which is how it is reached from a phone or anothe
 - **`./test` must pass with no network and an empty model cache**, and it once did not: a meet-ai test
   built the real 1.5 GB Whisper model and passed only because the developer's cache held it. Check it
   clean-room, in the image: `docker run --rm --network none -e HF_HOME=/tmp/empty-hf -e HOME=/tmp/h
-  --entrypoint bash suite-backend -c 'cd meet-ai && ../.venv/bin/python -m pytest tests -q'` (and the
+  --entrypoint bash shelby-backend -c 'cd meet-ai && ../.venv/bin/python -m pytest tests -q'` (and the
   other tools). `./start-docker test` runs every suite in the image, with docu-ai's corpus mounted
   because one of its tests reads a fixed path in the author's home folder.
 - **What was run for real, and what was not:** see `plan.md` ("Built and verified"). The Tailscale
@@ -163,12 +163,12 @@ set up" as information, not as something needing attention.
 ## Settings
 
 `.env` (from `.env.example`, never committed) is read by `./start-docker` and passed to the containers, so
-every tool inherits it. It holds only what is genuinely suite-wide: the AWS profile and region, the port.
+every tool inherits it. It holds only what is genuinely Shelby-wide: the AWS profile and region, the port.
 A tool's own paths stay in `assistant/tools.yaml`, the one file that knows every tool exists.
 
 ## Working in this repo — rules learned the hard way
 
-- **Run `./publish-check` before every push.** `suite` is public. It reads the commits GitHub does not have:
+- **Run `./publish-check` before every push.** `shelby` is public. It reads the commits GitHub does not have:
   exit 1 is a secret (a key's shape, or a value from this machine's own login files) or a credentials file, and
   the push must not happen; exit 2 is a personal detail not already public (an email, a phone number, a server
   id), to show the user. It never prints a secret whole. Its tests build fakes from pieces, so none is written
@@ -213,7 +213,7 @@ A tool's own paths stay in `assistant/tools.yaml`, the one file that knows every
   not touch: on 2026-10-15 every build in the container failed with `invalid_grant` on a token Google had let
   lapse two weeks earlier. `./auth` now copies a login that is good on the host into `data/config` when the
   refresh token differs (`--check` only says so), never the other way and never from a dead login.
-- **Done means run for real and looked at.** Unit tests passed on every change this suite has had;
+- **Done means run for real and looked at.** Unit tests passed on every change Shelby has had;
   the real runs are what found the dropped quotes, the 8-page minutes, the truncated CV draft and
   the cut-off approval preview. Build it, run it, open the output.
 
@@ -222,3 +222,8 @@ A tool's own paths stay in `assistant/tools.yaml`, the one file that knows every
 Each tool was its own repo until 2026-09-27; their histories were rewritten into these folders
 and merged, so `git log -- docu-ai/src/...` and `git blame` show the real commits. audiobook joined
 the same way on 2026-10-10 (four commits, `98c60e3`), with its own web app removed afterwards.
+
+It was called `suite` until 2026-11-07, when the user renamed it Shelby, everything: the folder (`~/Documents/shelby`),
+the GitHub repo (`Philips-DR/shelby`; the old address forwards), Docker's project, images, containers and the backend's
+user, the database and its user, the `SHELBY_*` settings, and the Tailscale machine (`shelby.<tailnet>.ts.net`).
+"Test suite" and "a suite of tools" are plain English and were left alone. Older commits and notes say `suite`.

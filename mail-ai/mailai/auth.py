@@ -1,7 +1,7 @@
 """Google credentials, supplied rather than discovered.
 
 The config object is the whole point: as long as a tool reaches into the environment for
-its own credentials, "where identity lives" is a fact every tool in the suite has to agree
+its own credentials, "where identity lives" is a fact every tool in Shelby has to agree
 on, and the second tool either duplicates the lookup or imports the first to borrow it.
 `from_environment()` is the named escape hatch, and only a front door may call it.
 """

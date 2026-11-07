@@ -20,7 +20,7 @@ MCP door, where it is tested and cannot drift.
 ../web/serve                                # the web app, on http://127.0.0.1:8751/
 ```
 
-The web app is a separate program in `../web` (the suite's `./start` runs both). This server
+The web app is a separate program in `../web` (Shelby's `./start` runs both). This server
 is the API only and serves no page.
 
 **Chat** and **Buttons** are a toggle at the top. Buttons mode is a Meetings panel today —

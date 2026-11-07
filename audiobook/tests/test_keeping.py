@@ -1,4 +1,4 @@
-"""What this tool hands to the suite for keeping, and letting go of it after (keeping.py). The suite files what
+"""What this tool hands to Shelby for keeping, and letting go of it after (keeping.py). Shelby files what
 `inventory` lists and then asks `release` to delete the working copies: so release must delete only finished audio
 in output/, and only the very copy that was filed."""
 
@@ -134,7 +134,7 @@ def test_release_deletes_only_the_filed_copy_of_finished_audio_and_its_text(benc
 
 
 def test_a_render_writes_down_beside_each_chapter_exactly_what_it_says(tmp_path, monkeypatch):
-    """What the suite keeps with the audio. Written from the chapter as it was spoken, so a later change to the plan
+    """What Shelby keeps with the audio. Written from the chapter as it was spoken, so a later change to the plan
     (a correction, a better reading) does not change what the file is said to say."""
     import numpy as np
 
@@ -170,7 +170,7 @@ def test_a_render_writes_down_beside_each_chapter_exactly_what_it_says(tmp_path,
     assert {k: written[k] for k in ("number", "title", "album", "speed", "voice", "pdf")} == {
         "number": 6, "title": "Chapter 6 Knowing the Source", "album": "Dreams and Visions", "speed": 0.95,
         "voice": "abigail", "pdf": "/books/dreams.pdf"}
-    # Written before the render says the chapter is finished, which is when the suite may take it.
+    # Written before the render says the chapter is finished, which is when Shelby may take it.
     assert told == [(tmp_path / "06-chapter-6-knowing-the-source-0.95x.mp3", True)]
 
 

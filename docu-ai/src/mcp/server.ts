@@ -354,7 +354,7 @@ export function createDocuAiServer(auth: AuthProvider, paths: ServerPaths = {}):
     {
       title: 'Save a built document as a Word or PDF file, to attach to an email',
       description:
-        'Export a Google Doc docu-ai built and save it as a file in the exports folder the suite gave docu-ai. ' +
+        'Export a Google Doc docu-ai built and save it as a file in the exports folder Shelby gave docu-ai. ' +
         'Returns the file\'s path, name and size, never its bytes. This is how a CV or cover letter is attached ' +
         'to an email: pass the returned `path` to mail_ai__draft_new in `attachments`, as {path}. Do not use ' +
         '`export` for that: it returns the whole file as text (a Word CV is about 650 KB), far more than you ' +
@@ -376,7 +376,7 @@ export function createDocuAiServer(auth: AuthProvider, paths: ServerPaths = {}):
     },
     async ({ documentId, format, filename }) => {
       try {
-        if (!paths.exportsDir) return failed(new Error('No exports folder: the suite gives docu-ai one in DOCU_AI_EXPORTS.'))
+        if (!paths.exportsDir) return failed(new Error('No exports folder: Shelby gives docu-ai one in DOCU_AI_EXPORTS.'))
         return ok(await saveExport(paths.exportsDir, await exportDocument(auth, documentId, format), filename))
       } catch (error) {
         return failed(error)

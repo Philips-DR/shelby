@@ -179,7 +179,7 @@ def book_overview(pdf: Path) -> dict:
     return {
         "pdf": str(pdf), "analysed": True, "title": plan.title, "author": plan.author,
         "chapters": [
-            # `stem`: how this chapter's audio is named, before the speed (names.chapter_stem). Audio the suite now
+            # `stem`: how this chapter's audio is named, before the speed (names.chapter_stem). Audio Shelby now
             # keeps instead of this folder is matched to the chapter by it, as `audio` here is.
             {"number": i, "label": chapter_label(i, c), "appendix": c.appendix, "stem": chapter_stem(i, c.title),
              "words": sum(len(s.text.split()) for s in c.segments),

@@ -11,7 +11,7 @@ model** — it fetches, and returns what the page says, word for word. It writes
 ./web github you/your-repo                           # is this one public?
 ```
 
-In the suite, the assistant uses these when you give it an address: to read a job posting or a company's careers
+In Shelby, the assistant uses these when you give it an address: to read a job posting or a company's careers
 page, to find the vacancies on it, and to check what a CV says about public repositories and links before it is
 made. What it reads from a page it passes to `apply-ai` as the posting.
 

@@ -34,7 +34,7 @@ BEDROCK_PREFIX = "anthropic."
 # actually answers. Access is granted per-account in the Bedrock console, not in code, so
 # raise this the moment Opus 5 is enabled there.
 DEFAULT_MODELS = {
-    ANTHROPIC: "claude-opus-5-5",  # not run against the API (no key here); SUITE_MODEL in `.env` names another
+    ANTHROPIC: "claude-opus-5-5",  # not run against the API (no key here); SHELBY_MODEL in `.env` names another
     BEDROCK: "us.anthropic.claude-opus-4-6-v1",
 }
 
@@ -98,7 +98,7 @@ def check_configured(config: ModelConfig, what: str = "notes", env: dict | None 
         has = config.region or environ.get("AWS_DEFAULT_REGION")
     if not has:
         raise NoModel(
-            f"No model is set up, so {what} cannot be written. Set ANTHROPIC_API_KEY (in the suite, put it in .env and run "
+            f"No model is set up, so {what} cannot be written. Set ANTHROPIC_API_KEY (in Shelby, put it in .env and run "
             "./start-docker up). Recording, transcribing and reading a meeting do not need a model."
         )
 
@@ -115,12 +115,12 @@ def explain_model_error(error: BaseException, config: ModelConfig, what: str = "
                     "ANTHROPIC_API_KEY, then run ./start-docker up.")
         if name == "NotFoundError":
             return (f"The model {config.resolved_model} is not available to this API key, so {what} cannot be written. "
-                    "Set SUITE_MODEL in .env to one it can use, then run ./start-docker up.")
+                    "Set SHELBY_MODEL in .env to one it can use, then run ./start-docker up.")
     else:
         if name in ("NoCredentialsError", "ProfileNotFound", "PartialCredentialsError"):
-            return f"No model is set up, so {what} cannot be written. Set ANTHROPIC_API_KEY (in the suite, put it in .env and run ./start-docker up)."
+            return f"No model is set up, so {what} cannot be written. Set ANTHROPIC_API_KEY (in Shelby, put it in .env and run ./start-docker up)."
         if any(s in text for s in ("expired", "sso", "token", "refresh")):
-            return f"The model's login has expired, so {what} cannot be written. Run ./auth in the suite folder."
+            return f"The model's login has expired, so {what} cannot be written. Run ./auth in the shelby folder."
     if name in ("APIConnectionError", "APITimeoutError", "EndpointConnectionError", "ConnectTimeoutError"):
         return f"Could not reach the model, so {what} cannot be written. Check the network connection and try again."
     return None

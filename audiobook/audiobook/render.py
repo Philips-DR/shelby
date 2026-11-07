@@ -245,7 +245,7 @@ def render_book(
     """Render chapters to MP3s (and optionally one M4B). Returns the M4B path if built.
 
     Beside each MP3 goes `<its name>.json`: the chapter's number, title and book, the speed, `labels` (voice, PDF,
-    author), and exactly the text it speaks, written down as it was spoken. That is what the suite keeps with the
+    author), and exactly the text it speaks, written down as it was spoken. That is what Shelby keeps with the
     audio (keeping.py); the plan can change after (corrections, a better reading), the MP3 does not."""
     out_dir.mkdir(parents=True, exist_ok=True)
     render = ChunkRenderer(narrator)

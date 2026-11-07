@@ -1,4 +1,4 @@
-"""What a model (or the suite's web app) can ask of the tool, against the saved test paper."""
+"""What a model (or Shelby's web app) can ask of the tool, against the saved test paper."""
 
 import gzip
 from pathlib import Path

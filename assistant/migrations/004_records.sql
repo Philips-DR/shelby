@@ -1,4 +1,4 @@
--- What tools made that the suite keeps (layer 1b of plan.md, phase B; shape A, the user's choice of 2026-11-01).
+-- What tools made that Shelby keeps (layer 1b of plan.md, phase B; shape A, the user's choice of 2026-11-01).
 -- A tool labels each thing it made -- kind, key, labels, text, files -- and the assistant files it here under
 -- those labels without knowing what it is (records.py). One record per (tool, kind, key): filing the same key
 -- again replaces it. labels are the tool's own words, kept as it gave them; body is the record's text, if any (a

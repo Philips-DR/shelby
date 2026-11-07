@@ -1,6 +1,6 @@
 """./publish-check: what is about to leave this machine for the public repository, looked at before it goes.
 
-`suite` has been public since 2026-10-24. Making it so needed a hand-built scan of every commit, and each push
+`shelby` has been public since 2026-10-24. Making it so needed a hand-built scan of every commit, and each push
 since was scanned by hand again. This is that scan, the same every time:
 
   must fix   a key or token in a known shape, any secret value that is in this machine's own login files,

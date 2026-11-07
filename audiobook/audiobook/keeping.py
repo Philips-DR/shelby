@@ -1,6 +1,6 @@
-"""What this tool hands over for keeping, and letting go of it after (the suite's layer 1b, ../../plan.md).
+"""What this tool hands over for keeping, and letting go of it after (Shelby's layer 1b, ../../plan.md).
 
-Alone, none of this runs: finished audio stays in output/ as it always has. In the suite, the assistant asks
+Alone, none of this runs: finished audio stays in output/ as it always has. In Shelby, the assistant asks
 `inventory` for everything here worth keeping, labelled so that something which knows what a book is (the
 Audiobooks page) can find it again; the assistant files it in its own store and database without reading inside,
 then calls `release` for the working copies this tool no longer needs to hold. This tool never learns where they
@@ -188,7 +188,7 @@ def inventory(jobs_dir: Path) -> dict:
 
 
 def release(wanted: list[dict]) -> dict:
-    """Delete working copies the suite has filed: only finished audio in output/, only a plain file whose SHA-256
+    """Delete working copies Shelby has filed: only finished audio in output/, only a plain file whose SHA-256
     is the one filed (so nothing changed since, and nothing not filed, can go), with a chapter's text beside it."""
     root = OUTPUT.resolve()
     released, kept = [], []

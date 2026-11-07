@@ -114,7 +114,7 @@ function Details({ text }: { text: string | undefined }) {
 function SignInAgain({ names }: { names: string[] }) {
   return (
     <div className="set-fix" role="group" aria-label="How to sign in again">
-      <p><b>Signed out of {joinNames(names)}.</b> Run this in the suite folder. It opens a browser for each login that needs it and leaves the others alone.</p>
+      <p><b>Signed out of {joinNames(names)}.</b> Run this in the shelby folder. It opens a browser for each login that needs it and leaves the others alone.</p>
       <div className="set-fix-run">
         <code>./auth</code>
         <CopyButton text="./auth" />
@@ -131,11 +131,11 @@ function ModelFix({ model }: { model: Status['model'] }) {
   return (
     <div className="set-fix" role="group" aria-label="How to fix the model">
       {kind === 'key-refused' ? (
-        <p><b>The Anthropic API key was refused.</b> Put a working key in <code>.env</code> as <code>ANTHROPIC_API_KEY=…</code>, then run this in the suite folder:</p>
+        <p><b>The Anthropic API key was refused.</b> Put a working key in <code>.env</code> as <code>ANTHROPIC_API_KEY=…</code>, then run this in the shelby folder:</p>
       ) : (
         <p>
           <b>This API key cannot use the model {model.model}.</b> {model.available?.length ? <>It can use {joinNames(model.available)}. </> : ''}
-          Set <code>SUITE_MODEL=…</code> in <code>.env</code> to one it can, then run this in the suite folder:
+          Set <code>SHELBY_MODEL=…</code> in <code>.env</code> to one it can, then run this in the shelby folder:
         </p>
       )}
       <div className="set-fix-run">
@@ -554,7 +554,7 @@ export function Settings() {
         <aside className="set-auth" aria-label="Signing back in">
           <IconAlert size={18} aria-hidden />
           <p className="hint">
-            Signed out of something? Run <code>./auth</code> in the suite folder: it checks every login and renews only the dead ones.
+            Signed out of something? Run <code>./auth</code> in the shelby folder: it checks every login and renews only the dead ones.
           </p>
           <CopyButton text="./auth" />
         </aside>

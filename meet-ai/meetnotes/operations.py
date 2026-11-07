@@ -210,7 +210,7 @@ def preview_notes(timeline_path: Path, out_dir: Path | None = None,
                   lexicon_path: Path | None = None) -> NotesPreview:
     """Everything up to the model call, and nothing that costs money or writes a file.
 
-    The preview every tool in this suite owes. It is the one notes operation that needs no
+    The preview every tool in Shelby owes. It is the one notes operation that needs no
     credentials, which is exactly why it is the approval surface.
     """
     from meetnotes.extract import transcript_for_model

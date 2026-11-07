@@ -4,10 +4,10 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # This tool's own environment: it needs torch, Docling and Pocket TTS, which nothing else in
-# the suite does, so it never shares the suite's. (CLAUDE.md, "The shared Python environment".)
+# Shelby does, so it never shares Shelby's. (CLAUDE.md, "The shared Python environment".)
 PY="$DIR/.venv/bin/python"
 if [[ ! -x "$PY" ]]; then
-  echo "No Python environment. In the suite: run ./setup at its top. Alone: see audiobook/README or CLAUDE.md (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)" >&2
+  echo "No Python environment. In Shelby: run ./setup at its top. Alone: see audiobook/README or CLAUDE.md (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)" >&2
   exit 1
 fi
 

@@ -1,6 +1,6 @@
-"""Taking what a tool made into the suite's keeping (layer 1b of ../../plan.md, phase B; shape A).
+"""Taking what a tool made into Shelby's keeping (layer 1b of ../../plan.md, phase B; shape A).
 
-The tool works at its own bench, in its own folders, alone or in the suite; it never learns the store or the
+The tool works at its own bench, in its own folders, alone or in Shelby; it never learns the store or the
 database exists. A tool that makes things worth keeping offers two tools by agreed name, as `login_status` is
 agreed (only the names; a tool without them is simply not asked):
 

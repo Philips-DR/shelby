@@ -418,30 +418,30 @@ def test_the_browser_approval_shows_a_long_preview_whole(tmp_path):
 def test_hosts_are_exact_lowercase_names_never_patterns():
     from assistant.server import parse_hosts
     assert parse_hosts(None) == frozenset() and parse_hosts("") == frozenset()
-    assert parse_hosts("Suite.Tail1234.ts.net, backend web") == {"suite.tail1234.ts.net", "backend", "web"}
+    assert parse_hosts("Shelby.Tail1234.ts.net, backend web") == {"shelby.tail1234.ts.net", "backend", "web"}
 
 
 def test_a_configured_name_may_reach_the_api_and_any_other_may_not(tmp_path):
     from assistant.server import create_app
     app = create_app(tmp_path / "tools.yaml", tmp_path / "memory.json", tmp_path / "audit.jsonl", token=TOKEN,
                      registry_factory=lambda local: ToolRegistry([], local=local), watch_jobs=False,
-                     hosts=frozenset({"suite.tail1234.ts.net"}))
+                     hosts=frozenset({"shelby.tail1234.ts.net"}))
 
     async def body(client):
         got = {}
-        for host in ("suite.tail1234.ts.net", "SUITE.tail1234.ts.net:8443", "127.0.0.1:8750", "evil.example", "tail1234.ts.net"):
+        for host in ("shelby.tail1234.ts.net", "SHELBY.tail1234.ts.net:8443", "127.0.0.1:8750", "evil.example", "tail1234.ts.net"):
             got[host] = (await client.get("/api/tools", headers={**AUTH, "host": host})).status_code
-        got["right name, no token"] = (await client.get("/api/tools", headers={"host": "suite.tail1234.ts.net"})).status_code
+        got["right name, no token"] = (await client.get("/api/tools", headers={"host": "shelby.tail1234.ts.net"})).status_code
         return got
 
     got = run(with_client(app, body))
-    assert got == {"suite.tail1234.ts.net": 200, "SUITE.tail1234.ts.net:8443": 200, "127.0.0.1:8750": 200,
+    assert got == {"shelby.tail1234.ts.net": 200, "SHELBY.tail1234.ts.net:8443": 200, "127.0.0.1:8750": 200,
                    "evil.example": 403, "tail1234.ts.net": 403, "right name, no token": 401}
 
 
 def test_without_configured_names_only_localhost_is_allowed(tmp_path):
     async def body(client):
-        return (await client.get("/api/tools", headers={**AUTH, "host": "suite.tail1234.ts.net"})).status_code
+        return (await client.get("/api/tools", headers={**AUTH, "host": "shelby.tail1234.ts.net"})).status_code
     assert run(with_client(app_for(tmp_path), body)) == 403
 
 

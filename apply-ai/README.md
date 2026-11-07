@@ -9,7 +9,7 @@ have actually written. **Not a writer and not a model** — it reads and reports
 ./apply claims DRAFT.md CV.md --posting POSTING.txt   # every figure and overstating word, traced to a line
 ```
 
-In the suite, the assistant runs these for you when you ask it to tailor a CV or write a cover letter, before
+In Shelby, the assistant runs these for you when you ask it to tailor a CV or write a cover letter, before
 it drafts anything:
 
 1. **`requirements`** lists everything the posting asks for and what your material shows for each. Degrees,
@@ -24,5 +24,5 @@ it drafts anything:
 It cannot tell that a sentence is true. A clean result means nothing it looks for was unsupported; the
 sentences are still yours to read. Your own earlier drafts are never counted as your material.
 
-Reads files only from the suite's uploads folder (`APPLY_AI_ROOTS`), and only ones you uploaded. Its rules and
+Reads files only from Shelby's uploads folder (`APPLY_AI_ROOTS`), and only ones you uploaded. Its rules and
 the failures behind each are in [`CLAUDE.md`](CLAUDE.md).

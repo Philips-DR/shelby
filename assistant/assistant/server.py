@@ -357,7 +357,7 @@ def create_app(
     allowed_emails: frozenset[str] = frozenset(),
     database_url: str | None = None,
 ) -> FastAPI:
-    # Every file the suite keeps (files.py): <root>/<id>/<name>, each recorded in the `files` table, or in
+    # Every file Shelby keeps (files.py): <root>/<id>/<name>, each recorded in the `files` table, or in
     # index.json there with no database. `legacy_uploads` is the old uploads folder, copied in once on start.
     files_root = (files_path or ROOT / "files").resolve()
     # Where stored markdown is lent to a tool for one call (texts.py). Everything a lend makes there is removed,
@@ -374,7 +374,7 @@ def create_app(
     memory, audit = stores_for(database, memory_path, audit_path)
     conversations = ConversationStore(database) if database else NullConversationStore()
     file_index = files.index_for(database, files_root)
-    # What tools made that the suite keeps, under the tools' own labels (records.py, collect.py).
+    # What tools made that Shelby keeps, under the tools' own labels (records.py, collect.py).
     records = records_for(database, files_root)
     lender = texts.Lender(texts_root, file_index)
     doc_batches = up.DocBatches()
@@ -907,7 +907,7 @@ def create_app(
                             filename=record.name)
 
     # -----------------------------------------------------------------------
-    # What tools made that the suite keeps (records.py): listed under the tool's own labels, its text read one at
+    # What tools made that Shelby keeps (records.py): listed under the tool's own labels, its text read one at
     # a time, deleted only by a button. The page knows what they are; this server does not.
     # -----------------------------------------------------------------------
 
@@ -1003,7 +1003,7 @@ def create_app(
 
     @app.get("/")
     async def root() -> dict[str, Any]:
-        # The API only. The web app is its own program (suite/web) on its own port, and this
+        # The API only. The web app is its own program (shelby/web) on its own port, and this
         # server knows nothing about it beyond which origins may call it.
         return {"service": "assistant", "api": "/api"}
 

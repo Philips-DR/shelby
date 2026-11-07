@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install everything the suite needs, once: one Python environment shared by the three
+# Install everything Shelby needs, once: one Python environment shared by the three
 # light Python tools, audiobook's own (torch, Docling and Pocket TTS are ~1.9 GB nothing else
 # uses), docu-ai's Node packages, the web app's packages and build, and meet-ai's speaker models.
 # Safe to re-run; each step skips what is already done. Touches nothing outside this folder
@@ -19,11 +19,11 @@ need npm     "install Node 24"
 need ffmpeg  "meet-ai records and decodes audio with it"
 
 # The speech models (Whisper in meet-ai, Pocket TTS in audiobook) use an NVIDIA card when there is one,
-# which needs NVIDIA builds of their libraries: found by its driver answering. SUITE_GPU in .env or the
+# which needs NVIDIA builds of their libraries: found by its driver answering. SHELBY_GPU in .env or the
 # environment overrides it: cpu installs the CPU builds even so, nvidia installs NVIDIA's without asking.
-[[ -z "${SUITE_GPU:-}" && -f .env ]] && SUITE_GPU="$(sed -n 's/^SUITE_GPU=//p' .env | tail -1)"
-case "${SUITE_GPU:-auto}" in
-  cpu|nvidia) gpu="$SUITE_GPU" ;;
+[[ -z "${SHELBY_GPU:-}" && -f .env ]] && SHELBY_GPU="$(sed -n 's/^SHELBY_GPU=//p' .env | tail -1)"
+case "${SHELBY_GPU:-auto}" in
+  cpu|nvidia) gpu="$SHELBY_GPU" ;;
   *) if nvidia-smi -L >/dev/null 2>&1; then gpu=nvidia; else gpu=cpu; fi ;;
 esac
 nvidia=()

@@ -35,12 +35,12 @@ ENDPOINTS = {
 CONNECT_TIMEOUT = 3.0
 
 # The one command that renews every login that needs it. It is what the person is told, whichever login it was.
-SIGN_IN_AGAIN = "Run `./auth` in the suite folder: it renews only the logins that need it."
+SIGN_IN_AGAIN = "Run `./auth` in the shelby folder: it renews only the logins that need it."
 
 # The model through the first-party API, when `ANTHROPIC_API_KEY` is set (it wins over Bedrock): its key is not renewed by a
 # browser, it is replaced in `.env`, so the fix is different from `./auth`'s and the words are too.
 KEY_HINT = "Put a working key in `.env` as `ANTHROPIC_API_KEY=…`, then run `./start-docker up`."
-MODEL_HINT = "Set `SUITE_MODEL=<a model id this key can use>` in `.env`, then run `./start-docker up`."
+MODEL_HINT = "Set `SHELBY_MODEL=<a model id this key can use>` in `.env`, then run `./start-docker up`."
 NOT_SET_UP_HINT = ("No model is set up. Add `ANTHROPIC_API_KEY=…` to `.env` and run `./start-docker up`. "
                    "Chat and meeting notes need one; everything else works without.")
 KEY_CHECK_SECONDS = 15.0

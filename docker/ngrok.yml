@@ -1,4 +1,4 @@
-# ngrok tunnels for the suite's two services. Used by the ngrok sidecar in compose.yaml;
+# ngrok tunnels for Shelby's two services. Used by the ngrok sidecar in compose.yaml;
 # start-docker discovers the public URLs at run time from the ngrok API.
 version: "3"
 tunnels:

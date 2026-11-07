@@ -2,7 +2,7 @@
 
 A file cannot travel through a model: a Word CV is about 650 KB, which is at least 217,000 tokens as base64, and
 one model reply holds 16,000. So a caller names a file instead -- one docu-ai saved -- and this reads it. Only from
-the folder the suite injected (`MAIL_AI_ATTACH_ROOT`): a model chooses the path, and a path is otherwise a way to
+the folder Shelby injected (`MAIL_AI_ATTACH_ROOT`): a model chooses the path, and a path is otherwise a way to
 mail any file on the machine to anyone. Kept out of `compose.py`, which stays pure.
 """
 

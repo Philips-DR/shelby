@@ -6,7 +6,7 @@ import type { ExportFormat, ExportResult } from './drive.js'
  * Saving an export as a file, for another tool to take it from (2026-10-30).
  *
  * A file cannot travel through a model. A Word CV is ~650 KB, which is at least 217,000 tokens as base64, and one
- * model reply holds 16,000: the model would have to copy the bytes into its next call, and cannot. So the suite
+ * model reply holds 16,000: the model would have to copy the bytes into its next call, and cannot. So Shelby
  * gives docu-ai one folder (`DOCU_AI_EXPORTS`), this writes the file there and hands back only its path, and
  * mail-ai, given the same folder, attaches from it. The folder is injected; docu-ai never chooses or finds one.
  */
@@ -72,7 +72,7 @@ async function writeNew(folder: string, name: string, bytes: Buffer): Promise<st
 
 export async function saveExport(folder: string | undefined, result: ExportResult, requested?: string): Promise<SavedExport> {
   if (!folder) {
-    throw new Error('No exports folder: the suite gives docu-ai one in DOCU_AI_EXPORTS. Run on its own, use the CLI\'s export instead.')
+    throw new Error('No exports folder: Shelby gives docu-ai one in DOCU_AI_EXPORTS. Run on its own, use the CLI\'s export instead.')
   }
   const root = resolve(folder)
   const name = exportName(requested, result.filename, result.format)

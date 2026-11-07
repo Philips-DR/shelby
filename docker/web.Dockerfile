@@ -3,7 +3,7 @@
 # The web app: its own program, its own image. It calls the backend from the browser, so it needs
 # nothing from the backend image and the backend needs nothing from it.
 #
-# Built from the suite's root:  docker build -f docker/web.Dockerfile .   (or compose)
+# Built from Shelby's root:  docker build -f docker/web.Dockerfile .   (or compose)
 
 ARG NODE=24-slim
 

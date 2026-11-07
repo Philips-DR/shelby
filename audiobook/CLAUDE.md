@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in this folder. It is one tool of the suite (`../CLAUDE.md`
+Guidance for Claude Code when working in this folder. It is one tool of Shelby (`../CLAUDE.md`
 holds the rules that cover all of them) and also runs alone from here.
 
 ## Project
@@ -16,15 +16,15 @@ reports misreadings. `preview` and `render` both run on Docling + BookPlan (the 
 is gone).
 
 **Two front doors, no interface of its own.** The CLI (`python -m audiobook`) and the MCP door
-(`./mcp`, which the suite's assistant launches) both sit on `operations.py`; neither wraps the
+(`./mcp`, which Shelby's assistant launches) both sit on `operations.py`; neither wraps the
 other. The standalone web app this tool once had was removed on 2026-10-10: its features (read a
 book, check what will be spoken, corrections, voices, render with progress, play and download) are
-the **Audiobooks** panel of the suite's web app (`../web`), which reaches them through the
+the **Audiobooks** panel of Shelby's web app (`../web`), which reaches them through the
 assistant. Don't add a UI here.
 
 Language is Python, decided deliberately: Pocket TTS and the strong PDF-layout tools (Docling) are
 Python-only, and time is spent in model inference, not the host language. Don't propose a
-TypeScript rewrite; the interface is TypeScript already, in the suite's `../web`.
+TypeScript rewrite; the interface is TypeScript already, in Shelby's `../web`.
 
 ## Target hardware (matters for engine choice)
 
@@ -47,11 +47,11 @@ TypeScript rewrite; the interface is TypeScript already, in the suite's `../web`
   path was run for real after the change (a sentence in `abigail`, 1.09× real time, Whisper read it back
   word for word).
 - A full book is hours of audio, so the engine must run at or above real-time on CPU.
-- Python 3.14 in **this tool's own venv**, `.venv/` — never the suite's shared one. `./setup` at the
-  suite's top builds it from `requirements.txt` (every version pinned, with PyTorch's CPU index
+- Python 3.14 in **this tool's own venv**, `.venv/` — never Shelby's shared one. `./setup` at
+  Shelby's top builds it from `requirements.txt` (every version pinned, with PyTorch's CPU index
   declared in the file) and `requirements-dev.txt` (pytest); alone: `python3 -m venv .venv &&
   .venv/bin/pip install -r requirements.txt -r requirements-dev.txt`. Why separate (measured
-  2026-10-10): it is 1.9 GB against the shared 696 MB, nothing else in the suite uses torch, Docling
+  2026-10-10): it is 1.9 GB against the shared 696 MB, nothing else in Shelby uses torch, Docling
   or Pocket TTS, and torch has to come from PyTorch's CPU index (PyPI's default is a multi-GB CUDA
   build). Packages in common are only fastapi, uvicorn, starlette, numpy, pydantic and
   huggingface_hub, at patch-level differences — it is the weight and the index, not a conflict,
@@ -155,7 +155,7 @@ silence, then the title, then the usual `TITLE_PAUSE`. A chapter with no label (
 
 ## Speaking a chat reply (`speaking.py`, the `speak` tool, 2026-11-06)
 
-The suite's chat reads replies aloud through `speak(text, voice)`: up to 600 characters in (the page sends a sentence
+Shelby's chat reads replies aloud through `speak(text, voice)`: up to 600 characters in (the page sends a sentence
 at a time), an MP3 back as base64, nothing written. It is marked `interface_only` in its `_meta`, so the assistant
 never shows it to the model, and it is read-only.
 
@@ -327,9 +327,9 @@ Stages: extract → plan → voice → speak → assemble (details in plan.md §
   `preview` command can show exactly what is and isn't spoken.
 - Front doors (the CLI and the MCP door) call functions in `operations.py`; neither wraps the other.
 
-## The suite integration (2026-10-10)
+## Shelby integration (2026-10-10)
 
-How it was joined to the suite, and the rules that came out of running it for real:
+How it was joined to Shelby, and the rules that came out of running it for real:
 
 - **Long work is a detached process, not a thread.** `background.start` launches
   `python -m audiobook …` inside `bash -c '"$@"; echo "[exit $?]"'` with `start_new_session`, so the
@@ -351,7 +351,7 @@ How it was joined to the suite, and the rules that came out of running it for re
   file or delete one (`release` among them) are not read-only, so chat asks first and `tests/test_mcp_door.py` pins
   the split.
 - **Deleting a book's audio (2026-10-30), `delete_audiobook`.** It removes `output/<book>/` and nothing else.
-  Not the PDF (the suite's assistant owns uploads), not a voice, and **not the two shared caches**: the spoken
+  Not the PDF (Shelby's assistant owns uploads), not a voice, and **not the two shared caches**: the spoken
   chunks in `.cache/audio/<voice id>/` are keyed by voice and text, so they belong to no one book, and Docling's
   `.cache/docling/<pdf hash>.json` is kept on purpose so a re-uploaded book is already read. Its rules, each with
   a test that fails without it: the argument is a **name, never a path**; `output/voices` (the samples
@@ -397,7 +397,7 @@ How it was joined to the suite, and the rules that came out of running it for re
   A render stopped this way loses nothing (chunk cache); reading a book and cloning start over.
 - **Audio is served by the assistant, from `output/` only** (`tools.yaml`: `files: [output, voices, voice]`; see
   `assistant/CLAUDE.md`). Nothing here knows about HTTP.
-- **In the suite, finished work is handed over and let go (`keeping.py`, 2026-11-01; the suite's layer 1b, phase B).**
+- **In Shelby, finished work is handed over and let go (`keeping.py`, 2026-11-01; Shelby's layer 1b, phase B).**
   `inventory` (read-only) lists what is worth keeping, labelled: each chapter MP3 (book, number, title, album, speed,
   and since 2026-11-01 voice, PDF, length and **the exact text it speaks**, which `render_book` writes beside it as
   `<mp3 stem>.json` before announcing the chapter finished), each M4B, each voice sample, audio left loose at the top
@@ -405,7 +405,7 @@ How it was joined to the suite, and the rules that came out of running it for re
   else the file name; **needed because once a book's audio is kept the tool no longer lists it, and a chapter's own tag
   can be from an early wrong reading: Dreams and Visions showed as "Praise for" until the page read the book**), each
   voice (record, state, sample, source recording), each book's corrections, each finished job (its log with progress lines collapsed: read as bytes, since reading as text turns
-  every `\r` into a line). The suite files them and calls `release`, which deletes only finished audio in `output/`
+  every `\r` into a line). Shelby files them and calls `release`, which deletes only finished audio in `output/`
   whose SHA-256 is the filed copy's (and the chapter's `.json`). **Voices, corrections and jobs are never released**:
   a render needs the first two, `job_status` reads the third. A render still running hands over only the chapters its
   log says are finished. Alone, none of this runs and `output/` is as it always was. A chapter rendered before the

@@ -1,6 +1,6 @@
 # assistant — engineering rules
 
-The smallest component in the suite. It classifies, calls, gates, and logs. **No domain
+The smallest component in Shelby. It classifies, calls, gates, and logs. **No domain
 logic, ever** — if a change here needs to know what a timeline or a heading index is, it
 belongs in a tool instead.
 
@@ -49,7 +49,7 @@ to find once — an `AttributeError` from the rename above, presenting as a hang
 ## Memory
 
 - **It is the assistant's own state, and no tool may read it.** Tools take what they need as
-  arguments. The moment a tool reaches into memory, it stops being usable alone and the suite
+  arguments. The moment a tool reaches into memory, it stops being usable alone and Shelby
   has a shared mutable centre again.
 - **Not pgvector, on purpose.** Everything fits in a prompt at this scale, and sending all of
   it is more accurate than any retrieval. `relevant()` is the seam; narrow it only when the
@@ -141,7 +141,7 @@ may create databases on (each test makes one and drops it), so point it at a thr
 
 ## The interface is a separate program (`../web`)
 
-**This server is the API only.** The web app lives in the suite's top-level `web/`, is served
+**This server is the API only.** The web app lives in Shelby's top-level `web/`, is served
 by its own process on its own port (8751; Vite's dev server on 5173), and calls this API across
 origins. Separated completely on 2026-09-28. What that cost, and what it forced:
 
@@ -255,7 +255,7 @@ database directly.
 
 Layer 1b, phase B of `../plan.md`, in the shape the user chose ("A", 2026-11-01): **a tool labels what it made; the
 assistant files it under those labels without knowing what it is; the page that knows (Audiobooks) reads it back.**
-The workshop and the warehouse: the tool keeps working at its own bench, alone or in the suite, and finished work is
+The workshop and the warehouse: the tool keeps working at its own bench, alone or in Shelby, and finished work is
 carried to the store and the database.
 
 - **Two agreed names, like `login_status`.** A tool that keeps things offers a read-only `inventory` (items: `kind`,
@@ -363,8 +363,8 @@ to be recognised there.
   credentials stay with their tool, and the sign-in belongs to the assistant. Those scopes are
   non-sensitive, so no Google verification is needed. (The existing OAuth app is in "Testing", which is
   why the Docs and Gmail tokens expire weekly; that does not touch signing in.)
-- **The topology is already right.** The page is at `https://<SUITE_HOST>` (443) and the API at
-  `https://<SUITE_HOST>:8443`: one host, so one *site* and a `SameSite=Lax` cookie goes to both; two
+- **The topology is already right.** The page is at `https://<SHELBY_HOST>` (443) and the API at
+  `https://<SHELBY_HOST>:8443`: one host, so one *site* and a `SameSite=Lax` cookie goes to both; two
   ports, so two *origins*, which means `allow_credentials=True` with the exact origin list (never `*`),
   `credentials: 'include'` on every fetch, and `withCredentials` on the EventSource. With that the
   `?token=` exception for `/api/events` can go. Keep requiring a custom header on state-changing
@@ -372,7 +372,7 @@ to be recognised there.
 - **The page stops carrying a secret.** `WEB_INJECT_TOKEN=0` (already supported) and the app shows
   "Sign in with Google" when `/api/me` says 401. Decide at build time whether the token still works for
   `127.0.0.1` as a break-glass; it should not work over the tailnet once sign-in exists.
-- **First step, before any code: does Google accept `https://<SUITE_HOST>:8443/auth/callback`?** Google
+- **First step, before any code: does Google accept `https://<SHELBY_HOST>:8443/auth/callback`?** Google
   wants redirect URIs on a public top-level domain and `*.ts.net` has not been tried. Register it in a
   test OAuth client and see. If it is refused, the options are a custom domain pointing at the tailnet
   node with its own certificate, or Tailscale's own verified identity headers (which `tailscale serve`
@@ -456,13 +456,13 @@ together, remembers the last answer, and announces a change once; Settings, the 
 Bedrock, here and in meet-ai (`resolve_provider`), and reaches both because `.env` is the backend's `env_file` and tools inherit
 its environment. `model_status` on that route (`_key_status`) asks the API for the model by id (`models.retrieve`: one read, spends
 nothing) and tells three failures apart, because each is fixed differently: **`key_refused`** (401/403: replace the key, hint
-`KEY_HINT`), **`model_missing`** (404: name another with `SUITE_MODEL`, listing what the key can use, hint `MODEL_HINT`), and
+`KEY_HINT`), **`model_missing`** (404: name another with `SHELBY_MODEL`, listing what the key can use, hint `MODEL_HINT`), and
 anything else (the network: no setting fixes it, no hint). **"Not set up" is not an alarm:** no key and no AWS login to try
 (`NoCredentialsError` and friends) is `configured: False`, level `warning`, and Settings leaves it out of the things that need
 attention, because Mail, Meetings, Documents and Audiobooks work with no model at all (checked, below). A chat turn that dies
 because of the model now says so in plain words with a link to Settings (`status.model_failure`; the raw error stays in the event as
-`detail`) rather than "Something went wrong: <botocore text>". `SUITE_MODEL` (or `ASSISTANT_MODEL`, which wins) names the model for
-chat, `MEET_AI_MODEL` or `SUITE_MODEL` for meet-ai. **The key goes to the one tool that uses it, and to no other (`tools.py`, `tools.yaml`).** Tools inherit the backend's environment, which
+`detail`) rather than "Something went wrong: <botocore text>". `SHELBY_MODEL` (or `ASSISTANT_MODEL`, which wins) names the model for
+chat, `MEET_AI_MODEL` or `SHELBY_MODEL` for meet-ai. **The key goes to the one tool that uses it, and to no other (`tools.py`, `tools.yaml`).** Tools inherit the backend's environment, which
 would have put a key from `.env` into web-ai (it reads arbitrary web pages), docu-ai, mail-ai, apply-ai and audiobook. `ANTHROPIC_API_KEY`
 and `ANTHROPIC_AUTH_TOKEN` are now in `WITHHELD_FROM_TOOLS`, and meet-ai's entry in `tools.yaml` names them (`${ANTHROPIC_API_KEY:-}`: empty
 when unset, which is not a provider). Checked on a running copy by reading each process's own environment: the backend and meet-ai

@@ -68,5 +68,5 @@ servers:
     command: ${AUDIOBOOK_HOME:-../audiobook}/mcp
     cwd: ${AUDIOBOOK_HOME:-../audiobook}
     # What it makes: the audio, its voices and the recordings they were cloned from. Relative to its own folder.
-    # Nothing outside the folders named here is ever served, or taken into the suite's keeping (collect.py).
+    # Nothing outside the folders named here is ever served, or taken into Shelby's keeping (collect.py).
     files: [output, voices, voice]

@@ -297,7 +297,7 @@ Run for real against the API with a key Anthropic never issued: "The Anthropic A
 working key in .env as ANTHROPIC_API_KEY, then run ./start-docker up."
 
 **First-party default and the one `.env` line (2026-10-31).** The first-party default is `claude-opus-5-5` (was `claude-opus-5`; neither was
-ever run against the API, there being no key), and `SUITE_MODEL` in `.env` (or `MEET_AI_MODEL`, which wins) names another without a
+ever run against the API, there being no key), and `SHELBY_MODEL` in `.env` (or `MEET_AI_MODEL`, which wins) names another without a
 code change. The notes and minutes call uses `thinking` and `output_config` (effort, JSON schema), which are Anthropic's; a provider
 that is not Anthropic would need an adapter here and in the assistant, and is not built (an Anthropic key is enough for now).
 

@@ -30,7 +30,7 @@ def test_a_page_is_fetched_with_its_real_name_in_host_and_nothing_else_added():
     assert (got.status, got.body, got.content_type) == (200, b"<p>hi</p>", "text/html")
     assert sent["method"] == "GET"
     assert sent["headers"]["host"] == f"jobs.test:{site.port}"          # the name, though the connection went to the address
-    assert sent["headers"]["user-agent"].startswith("suite-web-ai/")
+    assert sent["headers"]["user-agent"].startswith("shelby-web-ai/")
     assert not {"cookie", "authorization", "referer", "proxy-authorization"} & set(sent["headers"])
 
 

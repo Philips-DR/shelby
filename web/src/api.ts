@@ -509,11 +509,11 @@ export const uploadVoice = (file: File, onProgress?: (fraction: number) => void)
  */
 export const fetchMedia = (path: string): Promise<Blob> => fetchBlob(`/api/files?path=${encodeURIComponent(path)}`)
 
-/** A file the suite keeps, by its id: an upload, or audio a tool made and handed over (assistant/collect.py). */
+/** A file Shelby keeps, by its id: an upload, or audio a tool made and handed over (assistant/collect.py). */
 export const fetchStored = (id: string): Promise<Blob> => fetchBlob(`/api/files/${encodeURIComponent(id)}`)
 
 /**
- * What a tool made that the suite keeps, filed under the tool's own labels (assistant/records.py). The server does
+ * What a tool made that Shelby keeps, filed under the tool's own labels (assistant/records.py). The server does
  * not know what any of it is; the page that shows it does (Audiobooks knows a chapter).
  */
 export interface KeptFile { id: string; name: string; bytes: number }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The suite in containers.
+# Shelby in containers.
 #
 #   ./start-docker up [--tailscale] [--ngrok] [--audio]   build if needed, start, and say where it is
 #   ./start-docker down                          stop it (your data is in ./data and stays)
@@ -19,7 +19,7 @@ docker compose version >/dev/null 2>&1 || { echo "needs the Docker Compose plugi
 
 [[ -f .env ]] || { cp .env.example .env; echo "Wrote .env from .env.example -- put an ANTHROPIC_API_KEY in it, or check the AWS profile (the model is optional: only Chat and meeting notes need one)."; }
 set -a; source .env; set +a
-export SUITE_UID="$(id -u)" SUITE_GID="$(id -g)"
+export SHELBY_UID="$(id -u)" SHELBY_GID="$(id -g)"
 
 cmd="${1:-up}"; shift || true
 # Compose wants the token to exist just to read the file, even to list or stop containers. Those
@@ -41,10 +41,10 @@ if $use_ngrok && [[ "$cmd" == up && -z "${NGROK_AUTHTOKEN:-}" ]]; then
   exit 1
 fi
 # The speech models use an NVIDIA card when the host has one (its driver answers) and Docker can hand it to a
-# container (the NVIDIA Container Toolkit has given Docker its runtime). SUITE_GPU=cpu in .env says no;
-# SUITE_GPU=nvidia skips the looking. A card Docker cannot reach is said once, and the suite runs on the CPU.
+# container (the NVIDIA Container Toolkit has given Docker its runtime). SHELBY_GPU=cpu in .env says no;
+# SHELBY_GPU=nvidia skips the looking. A card Docker cannot reach is said once, and Shelby runs on the CPU.
 gpu_note=""
-case "${SUITE_GPU:-auto}" in
+case "${SHELBY_GPU:-auto}" in
   cpu) ;;
   nvidia) files+=(-f compose.nvidia.yaml) ;;
   *)
@@ -136,8 +136,8 @@ YAML
       ngrok_web_host="$(echo "$NGROK_WEB_URL" | sed 's|https://||; s|/.*||')"
       ngrok_api_host="$(echo "$NGROK_API_URL" | sed 's|https://||; s|/.*||')"
       # Phase 2: recreate backend and web with the ngrok origins, hosts and API URL added.
-      export ASSISTANT_HOSTS="${SUITE_HOST:-suite.invalid},backend,web,$ngrok_web_host,$ngrok_api_host"
-      export ASSISTANT_ORIGINS="http://127.0.0.1:8751,http://localhost:8751,https://${SUITE_HOST:-suite.invalid},$NGROK_WEB_URL"
+      export ASSISTANT_HOSTS="${SHELBY_HOST:-shelby.invalid},backend,web,$ngrok_web_host,$ngrok_api_host"
+      export ASSISTANT_ORIGINS="http://127.0.0.1:8751,http://localhost:8751,https://${SHELBY_HOST:-shelby.invalid},$NGROK_WEB_URL"
       export ASSISTANT_REMOTE_API_URL="$NGROK_API_URL"
       dc up -d backend web
       echo
@@ -150,11 +150,11 @@ YAML
       echo
       echo "Up. On this computer:  http://127.0.0.1:8751/"
       if [[ ${#profiles[@]} -gt 0 ]]; then
-        if [[ -n "${SUITE_HOST:-}" ]]; then
-          echo "Over Tailscale:        https://${SUITE_HOST}/   (from a device signed in to your tailnet)"
+        if [[ -n "${SHELBY_HOST:-}" ]]; then
+          echo "Over Tailscale:        https://${SHELBY_HOST}/   (from a device signed in to your tailnet)"
         else
           echo "Tailscale is starting. Its first run prints a sign-in link:   ./start-docker logs tailscale"
-          echo "Then set SUITE_HOST=<the name it shows, e.g. suite.tail1234.ts.net> in .env and run this again."
+          echo "Then set SHELBY_HOST=<the name it shows, e.g. shelby.tail1234.ts.net> in .env and run this again."
         fi
       fi
     fi
@@ -168,23 +168,23 @@ YAML
 import json, os, sys
 d = json.load(sys.stdin)
 me = d["Self"]; name = me["DNSName"].rstrip(".")
-want = os.environ.get("SUITE_HOST", "")
+want = os.environ.get("SHELBY_HOST", "")
 print(f"This machine on your tailnet:  {name}   ({", ".join(me.get("TailscaleIPs", []))})")
 print("Your other devices:            " + (", ".join(p["HostName"] for p in d.get("Peer", {}).values()) or "none yet"))
-print(f"SUITE_HOST in .env:            {want or "(not set)"}" + ("" if want == name or not want else "   <-- does not match the name above"))
+print(f"SHELBY_HOST in .env:            {want or "(not set)"}" + ("" if want == name or not want else "   <-- does not match the name above"))
 print("HTTPS certificates:            " + ("on" if d.get("CertDomains") else "OFF -- the private address cannot work until this is on"))
 '
     echo; echo "What is being served:"; ts serve status 2>&1 | sed 's/^/  /'
     if ts serve status 2>&1 | grep -q "No serve config"; then
       echo; echo "Nothing is being served, so https://<name>/ will not open. Almost always this means HTTPS"
       echo "certificates are off for your tailnet: login.tailscale.com/admin/dns -> HTTPS Certificates -> Enable."
-      echo "Then restart the container so it tries again:  docker restart suite-tailscale-1   and run this again."
+      echo "Then restart the container so it tries again:  docker restart shelby-tailscale-1   and run this again."
     fi
     ;;
   logs)   dc logs -f --tail 100 ${service:-} ;;
   status) dc ps ;;
   import)
-    # Copies, never moves, and never overwrites: run it while the suite is stopped, once.
+    # Copies, never moves, and never overwrites: run it while Shelby is stopped, once.
     pgrep -f "m assistant[.]server" >/dev/null && { echo "Stop ./start first (the mailbox and uploads must not change while they are copied)." >&2; exit 1; }
     make_data
     # -T: the destination IS the thing, so a second run fills in what is missing instead of nesting a copy inside it.

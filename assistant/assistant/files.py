@@ -1,4 +1,4 @@
-"""The central file store (layer 1b of ../../plan.md): every file the suite keeps, in one place.
+"""The central file store (layer 1b of ../../plan.md): every file Shelby keeps, in one place.
 
 A file lives at <root>/<id>/<name>. The folder is named by an id that says nothing about whose the file is or
 which tool it is for; the file inside keeps the name it came with, exactly, because tools use it: docu-ai titles

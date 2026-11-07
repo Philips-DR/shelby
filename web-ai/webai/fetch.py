@@ -34,7 +34,7 @@ CONNECT_TIMEOUT = 10.0     # shorter, so a black-holed address (IPv6 with no rou
 DEADLINE = 60.0
 MAX_REDIRECTS = 5
 REDIRECTS = {301, 302, 303, 307, 308}
-USER_AGENT = f"suite-web-ai/{VERSION} (a read-only page reader)"
+USER_AGENT = f"shelby-web-ai/{VERSION} (a read-only page reader)"
 ACCEPT = "text/html,application/xhtml+xml,text/plain;q=0.9,application/json;q=0.5,*/*;q=0.1"
 
 

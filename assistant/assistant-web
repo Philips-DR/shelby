@@ -3,12 +3,12 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# This tool's own environment if it has one; otherwise the suite's, one folder up. So the
-# tool runs the same whether it is checked out alone or as part of the suite.
+# This tool's own environment if it has one; otherwise Shelby's, one folder up. So the
+# tool runs the same whether it is checked out alone or as part of Shelby.
 PY="$DIR/.venv/bin/python"
 [[ -x "$PY" ]] || PY="$(cd "$DIR/.." && pwd)/.venv/bin/python"  # normalised: Python 3.14 warns about ".." in its prefix
 if [[ ! -x "$PY" ]]; then
-  echo "No Python environment. In the suite: run ./setup at its top. Alone: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+  echo "No Python environment. In Shelby: run ./setup at its top. Alone: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
   exit 1
 fi
 cd "$DIR"

@@ -43,8 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-key", default=os.environ.get("ANTHROPIC_API_KEY"),
                         help="Anthropic API key. Default: $ANTHROPIC_API_KEY, which the "
                              "SDK also reads on its own")
-    parser.add_argument("--model", default=os.environ.get("MEET_AI_MODEL") or os.environ.get("SUITE_MODEL") or None,
-                        help="Model id. Default: $MEET_AI_MODEL or $SUITE_MODEL, else the current Claude model for the provider")
+    parser.add_argument("--model", default=os.environ.get("MEET_AI_MODEL") or os.environ.get("SHELBY_MODEL") or None,
+                        help="Model id. Default: $MEET_AI_MODEL or $SHELBY_MODEL, else the current Claude model for the provider")
     parser.add_argument("--effort", default=None,
                         choices=["low", "medium", "high", "max"],
                         help="How hard the model works on it. Default: high for notes, "
