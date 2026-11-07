@@ -93,9 +93,12 @@ export function Sidebar({ section, go, theme, setTheme, openPalette }: {
   return (
     <aside className="sidenav" aria-label="Sections">
       {/* Named for a screen reader: on the icon rail the word is hidden and the mark is decoration (axe). */}
-      <a className="brand" href="#overview" aria-label="Assistant: Overview" onClick={(e) => { e.preventDefault(); go('overview') }}>
+      <a className="brand" href="#overview" aria-label="Shelby, my personal AI assistant: Overview" onClick={(e) => { e.preventDefault(); go('overview') }}>
         <BrandMark />
-        <span className="brand-word">Assistant</span>
+        <span className="brand-text">
+          <span className="brand-word">Shelby</span>{' '}
+          <span className="brand-tag">My personal AI assistant</span>
+        </span>
       </a>
 
       <nav className="navgroups">

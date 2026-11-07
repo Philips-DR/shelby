@@ -27,7 +27,7 @@ export function Notices() {
       if (announced.current.has(e.seq)) continue
       announced.current.add(e.seq)
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification(e.title ?? 'Assistant', { body: e.body })
+        new Notification(e.title ?? 'Shelby', { body: e.body })
       }
     }
   }, [fresh])

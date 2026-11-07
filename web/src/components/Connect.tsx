@@ -25,7 +25,8 @@ export function Connect({ checking }: { checking?: boolean }) {
     <div className="login" role="dialog" aria-labelledby="login-title">
       <div className="login-card">
         <BrandMark size={48} />
-        <h1 id="login-title">Assistant</h1>
+        <h1 id="login-title">Shelby</h1>
+        <p className="login-tagline">My personal AI assistant</p>
         {checking ? (
           <p className="login-status">Signing in&#x2026;</p>
         ) : (

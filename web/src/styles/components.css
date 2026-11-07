@@ -251,6 +251,7 @@
   font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 650;
   color: var(--ink);
 }
+.login-tagline { margin: -24px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
 .login-status { color: var(--ink-2); font-size: var(--fs-sm); }
 
 /* the google button */

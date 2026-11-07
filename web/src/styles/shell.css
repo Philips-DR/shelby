@@ -44,7 +44,9 @@
 .brand:hover { text-decoration: none; }
 .brandmark { flex: none; transition: transform var(--dur-3) var(--ease); }
 .brand:hover .brandmark { transform: rotate(-8deg) scale(1.06); }
+.brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
 .brand-word { font-family: var(--font-display); font-size: 1.25rem; font-weight: 650; letter-spacing: -0.02em; }
+.brand-tag { font-size: var(--fs-xs); font-weight: 500; color: var(--ink-3); }
 
 .navgroups { display: flex; flex-direction: column; gap: 18px; }
 .navgroup { display: flex; flex-direction: column; gap: 2px; }
@@ -405,7 +407,7 @@ button.sheet-item:hover:not(:disabled) { background: var(--brand-soft); border: 
   .shell { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
   .sidenav { padding: 18px 10px 14px; align-items: center; gap: 18px; }
   .brand { padding: 0; }
-  .brand-word, .navlabel, .navgroup-label, .sidefoot .conn-text, .palette-hint span, .palette-hint kbd, .sidefoot .theme-switch { display: none; }
+  .brand-text, .navlabel, .navgroup-label, .sidefoot .conn-text, .palette-hint span, .palette-hint kbd, .sidefoot .theme-switch { display: none; }
   .navitem { width: 48px; justify-content: center; padding: 5px; }
   .navitem .navbadge { position: absolute; top: 2px; right: 0; }
   .navitem[aria-current='page']::before { left: -10px; }
