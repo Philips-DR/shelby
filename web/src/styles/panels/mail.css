@@ -173,11 +173,18 @@
 .mbox-msg-who strong, .mbox-msg-who .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mbox-msg > header time { text-align: right; }
 .mbox-body { padding-left: 48px; }
-.mbox-body pre { margin: 0; font-family: var(--font-ui); font-size: var(--fs-md); line-height: 1.6; overflow-wrap: anywhere; }
-.mbox-body pre.is-folded { max-height: 15rem; overflow: hidden; -webkit-mask-image: linear-gradient(var(--ink) 62%, transparent); mask-image: linear-gradient(var(--ink) 62%, transparent); }
-.mbox-body pre a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
-.mbox-body pre a:hover { text-decoration-thickness: 2px; }
-.mbox-body .ghost { margin: 6px 0 0 -10px; }
+/* a message's text as paragraphs, lists, quotes and rules (mailText.ts), at a width that reads */
+.mbox-prose { max-width: 72ch; font-size: var(--fs-md); line-height: 1.65; color: var(--ink); overflow-wrap: anywhere; }
+/* :where keeps this reset weaker than the spacing below it, so a paragraph after a list gets its space */
+.mbox-prose :where(p, ul, ol, blockquote) { margin: 0; }
+.mbox-prose > * + * { margin-top: 0.8em; }
+.mbox-prose ul, .mbox-prose ol { padding-left: 1.4em; }
+.mbox-prose li + li { margin-top: 0.35em; }
+.mbox-prose li::marker { color: var(--ink-3); }
+.mbox-prose blockquote { margin-left: 0; margin-right: 0; padding: 2px 0 2px 14px; color: var(--ink-2); border-left: 3px solid var(--line-strong); }
+.mbox-prose hr { margin: 1.2em 0; border: 0; border-top: 1px solid var(--line); }
+.mbox-prose a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.mbox-prose a:hover { text-decoration-thickness: 2px; }
 .mbox-msg .mbox-fold { margin: 4px 0 0 38px; min-height: 32px; font-size: var(--fs-xs); color: var(--ink-3); }
 
 /* an earlier message folded to a line: who, when, and its first words; pressing it opens it */
@@ -304,6 +311,58 @@
 .mbox-confirm-warning > svg { flex: none; margin-top: 1px; color: var(--bad); }
 .mbox-confirm-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
+/* ---- replying: a floating Reply button, and a window over the conversation, as Gmail does it (2026-11-07) ---- */
+
+/* room under the last message, so the button never sits on its last lines */
+.mbox-messages.has-fab { padding-bottom: 88px; }
+.mbox-replied { padding-top: 16px; }
+.mbox-fab {
+  position: fixed;
+  z-index: 40;
+  right: calc(var(--gutter) + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--gutter) + var(--mini-h, 0px) + env(safe-area-inset-bottom, 0px));
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 24px 0 20px;
+  font-size: var(--fs-md);
+  border-radius: 999px;
+  box-shadow: var(--shadow-2);
+  animation: rise var(--dur-3) var(--ease);
+}
+
+.mbox-modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: var(--gutter);
+  padding-bottom: calc(var(--gutter) + var(--mini-h, 0px));
+}
+.mbox-modal-backdrop { position: absolute; inset: 0; background: var(--overlay); animation: fade-in var(--dur-2) var(--ease); }
+.mbox-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(580px, 100%);
+  max-height: min(88dvh, 760px);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-2);
+  animation: rise var(--dur-3) var(--ease);
+}
+.mbox-modal-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 18px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.mbox-modal-title { flex: 1; min-width: 0; }
+.mbox-modal-title h2 { font-size: var(--fs-md); }
+.mbox-modal-title p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbox-modal-head .icon { flex: none; width: 40px; height: 40px; }
+.mbox-modal-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 16px 18px 18px; overflow-y: auto; overscroll-behavior: contain; }
+.mbox-modal-body textarea { width: 100%; min-height: 200px; resize: vertical; background: var(--surface); }
+.mbox-replying { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; font-size: var(--fs-sm); background: var(--bg-2); border-radius: 10px; overflow-wrap: anywhere; }
+
 .mbox-off { display: flex; align-items: flex-start; gap: 8px; margin: 4px var(--card-pad) var(--card-pad); padding: 12px 14px; background: var(--bg-2); border-radius: 12px; }
 .mbox-off > svg { flex: none; margin-top: 2px; }
 
@@ -341,4 +400,17 @@
   .mbox-reply { padding: 14px; }
   .mbox-msg > header { grid-template-columns: 36px minmax(0, 1fr); }
   .mbox-msg > header time { grid-column: 2; text-align: left; }
+  /* above the tab bar on a phone; the window takes the whole screen */
+  .mbox-fab { bottom: calc(var(--tab-h) + var(--mini-h, 0px) + env(safe-area-inset-bottom, 0px) + 14px); }
+  .mbox-modal-root { padding: 0; }
+  .mbox-modal {
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+    border: 0;
+    border-radius: 0;
+  }
+  .mbox-modal-body { padding: 14px; }
+  .mbox-modal-body textarea { min-height: 34dvh; }
 }

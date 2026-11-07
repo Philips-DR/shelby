@@ -38,6 +38,7 @@ export {
   Play as IconPlay,
   Plus as IconPlus,
   RefreshCw as IconRefresh,
+  Reply as IconReply,
   RotateCcw as IconRewind,
   RotateCw as IconForward,
   SkipBack as IconPrevious,

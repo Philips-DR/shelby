@@ -58,9 +58,10 @@ servers:
       MAIL_AI_ATTACH_ROOT: ${ASSISTANT_UPLOADS:-../assistant/uploads}/exports
     # Run by the backend whether or not a page is open: the page's own timer left the mailbox five days stale.
     # It fetches new mail into the local store and changes nothing in Gmail. Audited when its outcome changes.
+    # Every 15 minutes since 2026-11-07 (the user's choice; it was 30).
     schedule:
       - tool: sync
-        every_minutes: 30
+        every_minutes: 15
 
   # PDF to audiobook, in a cloned voice. Reading a book and rendering it are background jobs of
   # minutes to hours; job_status is how anyone watches them.

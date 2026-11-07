@@ -138,8 +138,9 @@ def test_tools_yaml_declares_a_schedule_and_the_registry_names_its_tool(tmp_path
     assert ToolRegistry([mail, meet]).schedules == [("mail-ai", "mail_ai__sync", 1800)]
 
 
-def test_the_shipped_tools_yaml_syncs_mail_every_half_hour():
+def test_the_shipped_tools_yaml_syncs_mail_every_quarter_hour():
+    """Every 15 minutes since 2026-11-07, the user's choice (it was 30)."""
     from pathlib import Path
     from assistant.config import load_tool_servers
     servers = load_tool_servers(Path(__file__).resolve().parents[1] / "tools.yaml")
-    assert ToolRegistry(servers).schedules == [("mail-ai", "mail_ai__sync", 1800)]
+    assert ToolRegistry(servers).schedules == [("mail-ai", "mail_ai__sync", 900)]

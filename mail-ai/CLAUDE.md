@@ -146,7 +146,13 @@ covers files the way it covers `bcc`.
   them. It is one read per draft. A draft deleted between the listing and its read is left out, not an error.
 - **The page's own find, not this tool's:** an HTML newsletter's text is mostly empty lines (one was 431 of 462,
   122 in a row). The page folds them when it shows a message (`web/src/components/mailText.ts`); the stored text
-  is untouched, so a model reading the thread sees what was synced.
+  is untouched, so a model reading the thread sees what was synced. Since 2026-11-07 the page also reads the text as
+  paragraphs, lists and rules, shows each link by its site, and leaves out the style sheets and preview padding some
+  senders put in their plain text (web/DESIGN.md -> Mail). **What this tool's text loses, the page cannot put back:**
+  `body_text` prefers `text/plain`, and some senders' plain text is poor where their HTML is not: a LinkedIn digest
+  put a 10,502-character article on one line, and a security notice glued its logo's name to "Hello"
+  ("VercelHello"). Preferring the HTML when the plain text is collapsed would help new mail only (the store keeps no
+  HTML); not done.
 - **Run for real:** the page saved a draft to the user's own address through `draft_new`, showed it whole at the
   first press of Send, was cancelled, opened it from Drafts and discarded it through the gate; the audit log has
   `draft_new` and `discard_draft` and no `send_draft`, Gmail held its 6 drafts again, and a sync found nothing sent.

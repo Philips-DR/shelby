@@ -480,7 +480,8 @@ showed three things signed out with one `./auth`. The real tokens were never tou
 
 A tool's entry in `tools.yaml` may say `schedule: [{tool: sync, every_minutes: 30}]`, and the server runs that
 tool, with no arguments, at start and then that long after each run ends, whether or not a page is open. Only
-mail-ai's `sync` has one. It used to be a timer in the web page: a closed tab left the mailbox five days stale
+mail-ai's `sync` has one: every 15 minutes since 2026-11-07 (the user's choice; it was 30), and the Mail page
+re-reads its list every 30 seconds, so new mail shows without pressing Sync. It used to be a timer in the web page: a closed tab left the mailbox five days stale
 (2026-10-24), and two tabs synced twice.
 
 - **Declared, never known.** The server reads `registry.schedules`; nothing in it names mail. A wrong entry

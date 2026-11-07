@@ -87,6 +87,35 @@ Buttons: default is quiet; `.primary` is the brand fill (one per view, the main 
 `.danger` for destructive confirmations; `.ghost` for borderless; `.icon` for square icon-only (give it
 an `aria-label`).
 
+## Mail (`components/Mail.tsx`, `components/mailText.ts`, 2026-11-07)
+
+The user's three asks: see the whole of a message, give it paragraphs and structure, and reply from a floating
+button that opens a window "like Gmail does".
+
+- **A message is read as structure, never as its markup** (`parseBody`): a paragraph the sender's program broke at
+  a fixed width is joined again (a break is the program's when the next word would not have fitted), lists (a
+  bullet or number, or a bullet alone on its line), quotes and rules are found, and a link shows its site
+  (`example.com/…`) with the whole address in its `href` and `title`. Left out: style sheets some senders leave in
+  their plain text (only a rule whose braces close and hold `name: value`; selector lines just above it go too,
+  never a sentence or a hashtag), and runs of preview padding (two or more zero-width or no-break characters; one
+  alone stays, as in an emoji). An article on one line, over 700 characters, is shown as paragraphs of a few
+  sentences, broken only at sentence ends. Measured on the latest 400 real messages: 40% of their text was links
+  (median 364 characters), 99 had wrapped sentences, 6 carried a style sheet (774 lines), 63 had padding runs.
+  The stored text is untouched: this is how the page shows it.
+- **Every message of a conversation is open, whole.** Any can still be folded to a line.
+- **Replying is a floating button and a window, the window a modal**: the button (`.mbox-fab`, `.primary`, 52 px)
+  sits in the corner, above the tab bar on a phone, and the list leaves room under the last message for it. The
+  window (`ReplyWindow`) is drawn into `<body>` as `ConfirmDelete` is; bottom right over a dimmed page on a wider
+  screen, the whole screen on a phone; `useLayer('mail-reply')`, so Back closes it; Tab goes round inside it; Esc,
+  the close button or a click beside it closes it **and keeps what was written** (it lives in `ThreadView`), the
+  button then saying "Continue reply". The ladder inside is unchanged: write, save as a draft in Gmail, then the whole
+  email shown before the one press that sends.
+- **A key pressed in a question drawn over the window is that question's.** `ConfirmDelete` is a portal too, and
+  React passes its keys up through the component tree: without the check the window's own Esc and Tab handling took
+  the discard question's keys. The window ignores events whose target is outside its own box.
+- **A `<header>` in something drawn into `<body>` is a second banner for the whole page** (axe, on a phone where the
+  top bar is one): the window's head is a `div`.
+
 ## Anything that must outlive a page (`src/player/`)
 
 Pages mount one at a time (`<main key={section}>`), so whatever a page owns dies when you leave it. The

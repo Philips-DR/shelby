@@ -7,7 +7,8 @@
 // email and confirm. Nothing is sent until the second press, and that press is only offered after the full
 // email has been shown; discarding a draft is asked about the same way, with the draft shown.
 
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode, type RefObject } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { runAction } from '../api'
 import { ask, call } from '../call'
 import { toolColor } from '../charts/palette'
@@ -16,11 +17,12 @@ import { ConfirmDelete } from '../ui/ConfirmDelete'
 import { Empty } from '../ui/Empty'
 import { useLayer } from '../ui/useLayer'
 import {
-  IconAlert, IconBack, IconCheck, IconChevron, IconDocuments, IconMail, IconOk, IconPlus, IconRefresh, IconSearch, IconSend, IconTrash,
+  IconAlert, IconBack, IconCheck, IconChevron, IconClose, IconDocuments, IconMail, IconOk, IconPlus, IconRefresh, IconReply, IconSearch, IconSend,
+  IconTrash,
 } from '../ui/icons'
 import { ago } from '../ui/time'
 import { usePoll } from '../usePoll'
-import { cleanBody, firstWords } from './mailText'
+import { firstWords, parseBody, type Block, type Line } from './mailText'
 import '../styles/panels/mail.css'
 
 interface Status { messages: number; threads: number; newest: string; full_sync_complete: boolean; synced_at?: string }
@@ -66,42 +68,39 @@ function Avatar({ name }: { name: string }) {
   return <span className="mbox-avatar" data-tint={tintOf(name)} aria-hidden>{initial(name)}</span>
 }
 
-// ---- one email body: text only, its empty runs folded, and folded itself when it is long -----------------
+// ---- one email body: read as paragraphs, lists, quotes and rules (mailText.ts), and shown whole -----------
 
-const URL_RE = /https?:\/\/[^\s<>"')\]]+/g
-
-function linkify(text: string): (string | ReactElement)[] {
-  const parts: (string | ReactElement)[] = []
-  let last = 0
-  for (const m of text.matchAll(URL_RE)) {
-    const at = m.index!
-    let url = m[0]
-    // Strip trailing punctuation that is almost certainly not part of the URL.
-    while (url.length > 8 && /[.,;:!?)>\]}]$/.test(url)) url = url.slice(0, -1)
-    if (at > last) parts.push(text.slice(last, at))
-    parts.push(<a key={at} href={url} target="_blank" rel="noopener noreferrer">{url}</a>)
-    last = at + url.length
-  }
-  if (last === 0) return [text]
-  if (last < text.length) parts.push(text.slice(last))
-  return parts
+function Inlines({ line }: { line: Line }) {
+  return (
+    <>
+      {line.map((part, i) => (typeof part === 'string'
+        ? part
+        : <a key={i} href={part.href} title={part.href} target="_blank" rel="noopener noreferrer">{part.label}</a>))}
+    </>
+  )
 }
 
-function Body({ text }: { text: string }) {
-  const shown = cleanBody(text)
-  const long = shown.length > 1400 || shown.split('\n').length > 20
-  const [expanded, setExpanded] = useState(false)
+function Blocks({ blocks }: { blocks: Block[] }) {
   return (
-    <div className="mbox-body">
-      {/* Email written by someone else: text only, never markup. Links are React elements, not innerHTML. */}
-      <pre className={long && !expanded ? 'is-folded' : ''}>{shown ? linkify(shown) : '(no text)'}</pre>
-      {long && (
-        <button className="ghost" aria-expanded={expanded} onClick={() => setExpanded((x) => !x)}>
-          {expanded ? 'Show less' : 'Show the whole message'}
-        </button>
-      )}
-    </div>
+    <>
+      {blocks.map((b, i) => {
+        if (b.kind === 'p') return <p key={i}>{b.lines.map((line, j) => <Fragment key={j}>{j > 0 && <br />}<Inlines line={line} /></Fragment>)}</p>
+        if (b.kind === 'list') {
+          const List = b.ordered ? 'ol' : 'ul'
+          return <List key={i}>{b.items.map((line, j) => <li key={j}><Inlines line={line} /></li>)}</List>
+        }
+        if (b.kind === 'quote') return <blockquote key={i}><Blocks blocks={b.blocks} /></blockquote>
+        return <hr key={i} />
+      })}
+    </>
   )
+}
+
+/** Email written by someone else: its text only, never its markup; a link is a React element, never innerHTML. The
+ *  whole of it, however long (the user, 2026-11-07: "when I open a mail, I want to see the whole thing"). */
+function Body({ text }: { text: string }) {
+  const blocks = useMemo(() => parseBody(text), [text])
+  return <div className="mbox-body mbox-prose">{blocks.length ? <Blocks blocks={blocks} /> : <p className="muted">(no text)</p>}</div>
 }
 
 // ---- the last step: the whole email, then one deliberate press ---------------------------------------
@@ -265,17 +264,31 @@ function Said({ ok, bad }: { ok?: string; bad?: string }) {
   )
 }
 
-function ReplyBox({ thread, onDraftsChanged }: { thread: ThreadDetail; onDraftsChanged: () => void }) {
-  const [text, setText] = useState('')
-  const [draft, setDraft] = useState<DraftRef | null>(null)
+/** Writing a reply, in a window over the conversation as Gmail opens one (the user, 2026-11-07), on a phone the
+ *  whole screen. The same ladder as before: write, save as a draft in Gmail, then the whole email shown before the
+ *  one press that sends. Its words are kept by ThreadView, so closing the window (Esc, the close button, a click
+ *  beside it, Back) loses nothing. Drawn into <body>, as ConfirmDelete is, and for the same reason. */
+function ReplyWindow({ thread, text, setText, draft, setDraft, onClose, onFinished, onDraftsChanged }: {
+  thread: ThreadDetail
+  text: string
+  setText: (to: string) => void
+  draft: DraftRef | null
+  setDraft: (to: DraftRef | null) => void
+  onClose: () => void
+  onFinished: (what: string) => void
+  onDraftsChanged: () => void
+}) {
+  const box = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState('')
   const [error, setError] = useState('')
+  const last = thread.messages[thread.messages.length - 1]
+
+  // The first thing to do: the box to write in, or the saved draft's buttons.
+  useEffect(() => { box.current?.querySelector<HTMLElement>('textarea, .mbox-actions button')?.focus() }, [])
 
   const save = async () => {
     setBusy(true)
     setError('')
-    setNote('')
     try {
       setDraft(await call<DraftRef>('mail_ai__draft_reply', { thread_id: thread.thread_id, body: text.trim() }))
       onDraftsChanged()
@@ -285,27 +298,65 @@ function ReplyBox({ thread, onDraftsChanged }: { thread: ThreadDetail; onDraftsC
       setBusy(false)
     }
   }
-  const done = (what: string) => { setDraft(null); setText(''); setNote(what); onDraftsChanged() }
 
-  return (
-    <section className="mbox-reply" aria-label="Reply" data-step={draft ? 2 : 1}>
-      <Steps step={draft ? 2 : 1} />
-      {!draft ? (
-        <div className="stack">
-          <label className="mbox-label" htmlFor="mbox-reply">Your reply</label>
-          <textarea id="mbox-reply" value={text} onChange={(e) => setText(e.target.value)} rows={5} placeholder="Write a reply" />
-          <div className="mbox-actions">
-            <button className="primary" disabled={!text.trim() || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save as draft'}</button>
-            <span className="hint">A draft is kept in Gmail. Nothing is sent.</span>
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    // The delete question is drawn into <body> too, and React passes its keys up to here: they are its, not ours.
+    if (e.defaultPrevented || !box.current?.contains(e.target as Node)) return
+    if (e.key === 'Escape' && !busy) {
+      e.preventDefault()
+      onClose()
+    } else if (e.key === 'Tab') {
+      // A modal: the focus goes round inside the window.
+      const all = [...box.current.querySelectorAll<HTMLElement>('button, textarea, input, a[href], [tabindex="0"]')]
+        .filter((el) => !(el as HTMLButtonElement).disabled && el.getClientRects().length > 0)
+      const first = all[0]
+      const end = all[all.length - 1]
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); end?.focus() }
+      else if (!e.shiftKey && document.activeElement === end) { e.preventDefault(); first?.focus() }
+    }
+  }
+
+  return createPortal(
+    <div className="mbox-modal-root" onKeyDown={onKey}>
+      <div className="mbox-modal-backdrop" onClick={() => { if (!busy) onClose() }} />
+      <div ref={box} className="mbox-modal" role="dialog" aria-modal="true" aria-labelledby="mbox-modal-title" aria-describedby="mbox-modal-sub">
+        {/* A div, not a header: drawn into <body>, a header would be a second banner for the whole page (axe). */}
+        <div className="mbox-modal-head">
+          <div className="mbox-modal-title">
+            <h2 id="mbox-modal-title">Reply</h2>
+            <p id="mbox-modal-sub" className="muted small">{thread.subject || '(no subject)'}</p>
           </div>
+          <button className="ghost icon" aria-label="Close, keeping what you wrote" title="Close (what you wrote is kept)" disabled={busy} onClick={onClose}>
+            <IconClose size={18} aria-hidden />
+          </button>
         </div>
-      ) : (
-        <DraftActions draft={draft} onSent={() => done('Sent.')} onDiscarded={() => done('Draft discarded.')}>
-          {text.trim() && <pre className="mbox-quote">{text.trim()}</pre>}
-        </DraftActions>
-      )}
-      <Said ok={note} bad={error} />
-    </section>
+        <div className="mbox-modal-body" data-step={draft ? 2 : 1}>
+          {last && (
+            <p className="mbox-replying">
+              <span>Replying to <b>{who(last.from)}</b></span>
+              <span className="muted">{firstWords(last.body, 140) || '(no text)'}</span>
+            </p>
+          )}
+          <Steps step={draft ? 2 : 1} />
+          {!draft ? (
+            <div className="stack">
+              <label className="mbox-label" htmlFor="mbox-reply">Your reply</label>
+              <textarea id="mbox-reply" value={text} onChange={(e) => setText(e.target.value)} rows={8} placeholder="Write a reply" />
+              <div className="mbox-actions">
+                <button className="primary" disabled={!text.trim() || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save as draft'}</button>
+                <span className="hint">A draft is kept in Gmail. Nothing is sent.</span>
+              </div>
+            </div>
+          ) : (
+            <DraftActions draft={draft} onSent={() => onFinished('Sent.')} onDiscarded={() => onFinished('Draft discarded.')}>
+              {text.trim() && <pre className="mbox-quote">{text.trim()}</pre>}
+            </DraftActions>
+          )}
+          <Said bad={error} />
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -386,24 +437,40 @@ function Compose({ heading, onBack, onDraftsChanged, onFinished }: {
 
 // ---- what is open: a conversation, or a draft --------------------------------------------------------
 
-function ThreadView({ id, canDraft, heading, onBack, onDraftsChanged }: {
+function ThreadView({ id, canDraft, visible, heading, onBack, onDraftsChanged }: {
   id: string
   canDraft: boolean
+  /** On screen: where the list and the conversation cannot sit side by side, a conversation stays mounted under the list. */
+  visible: boolean
   heading: RefObject<HTMLHeadingElement | null>
   onBack: () => void
   onDraftsChanged: () => void
 }) {
   const [detail, setDetail] = useState<ThreadDetail | null>(null)
   const [error, setError] = useState('')
-  // Only the newest message is open; the earlier ones are a line each until asked for.
+  // Every message is open, each whole (the user, 2026-11-07); any can be folded to a line.
   const [shown, setShown] = useState<Set<string>>(new Set())
+  // The reply is written in a window (ReplyWindow); what is in it is kept here, so closing the window loses nothing.
+  // The window is a layer, so a phone's Back closes it (useLayer.ts).
+  const [replying, setReplying] = useState<{ thread: string } | null>(null)
+  useLayer('mail-reply', replying, setReplying)
+  const open = replying?.thread === id
+  const [text, setText] = useState('')
+  const [draft, setDraft] = useState<DraftRef | null>(null)
+  const [note, setNote] = useState('')
+  const replyButton = useRef<HTMLButtonElement>(null)
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (wasOpen.current && !open) requestAnimationFrame(() => replyButton.current?.focus({ preventScroll: true }))
+    wasOpen.current = open
+  }, [open])
 
   useEffect(() => {
     let live = true // an earlier, slower answer must not replace the one asked for last
     setDetail(null)
     setError('')
     call<ThreadDetail>('mail_ai__read_thread', { thread_id: id }).then(
-      (d) => { if (live) { setDetail(d); setShown(new Set(d.messages.slice(-1).map((m) => m.id))) } },
+      (d) => { if (live) { setDetail(d); setShown(new Set(d.messages.map((m) => m.id))) } },
       (e) => { if (live) setError(message(e)) },
     )
     return () => { live = false }
@@ -415,6 +482,7 @@ function ThreadView({ id, canDraft, heading, onBack, onDraftsChanged }: {
   }
   const folded = detail.messages.filter((m) => !shown.has(m.id)).length
   const toggle = (mid: string) => setShown((old) => { const next = new Set(old); if (next.has(mid)) next.delete(mid); else next.add(mid); return next })
+  const finished = (what: string) => { setReplying(null); setDraft(null); setText(''); setNote(what); onDraftsChanged() }
 
   return (
     <>
@@ -427,7 +495,8 @@ function ThreadView({ id, canDraft, heading, onBack, onDraftsChanged }: {
         </p>
       </header>
 
-      <div className="mbox-messages">
+      <div className={`mbox-messages${canDraft ? ' has-fab' : ''}`}>
+        {note && <div className="mbox-replied"><Said ok={note} /></div>}
         {detail.messages.map((m) => (
           shown.has(m.id) ? (
             <article key={m.id} className="mbox-msg">
@@ -459,9 +528,18 @@ function ThreadView({ id, canDraft, heading, onBack, onDraftsChanged }: {
         ))}
       </div>
 
-      {canDraft
-        ? <ReplyBox key={detail.thread_id} thread={detail} onDraftsChanged={onDraftsChanged} />
-        : <p className="mbox-off hint"><IconAlert size={16} aria-hidden />Replying is off. Drafting and sending appear here once they are switched on for mail-ai.</p>}
+      {!canDraft && <p className="mbox-off hint"><IconAlert size={16} aria-hidden />Replying is off. Drafting and sending appear here once they are switched on for mail-ai.</p>}
+
+      {canDraft && visible && !open && createPortal(
+        <button ref={replyButton} className="primary mbox-fab" onClick={() => { setNote(''); setReplying({ thread: id }) }}>
+          <IconReply size={18} aria-hidden />{text.trim() || draft ? 'Continue reply' : 'Reply'}
+        </button>,
+        document.body,
+      )}
+      {canDraft && open && (
+        <ReplyWindow thread={detail} text={text} setText={setText} draft={draft} setDraft={setDraft}
+          onClose={() => setReplying(null)} onFinished={finished} onDraftsChanged={onDraftsChanged} />
+      )}
     </>
   )
 }
@@ -780,7 +858,7 @@ export function Mail() {
               Open one from the list to read it here{canCompose ? ', or write a new email' : ''}.
             </Empty>
           ) : pane.kind === 'thread' ? (
-            <ThreadView key={pane.id} id={pane.id} canDraft={canDraft} heading={heading} onBack={back} onDraftsChanged={() => void loadDrafts()} />
+            <ThreadView key={pane.id} id={pane.id} canDraft={canDraft} visible={view === 'pane'} heading={heading} onBack={back} onDraftsChanged={() => void loadDrafts()} />
           ) : pane.kind === 'draft' ? (
             <DraftView key={pane.id} id={pane.id} heading={heading} onBack={back} onFinished={finished} />
           ) : (
