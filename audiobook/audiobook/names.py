@@ -42,8 +42,14 @@ def chapter_audio(names: list[str], number: int, title: str) -> list[tuple[str, 
 # ---------------------------------------------------------------------------------------------
 # A title from the file name, for a PDF that names none in its own metadata
 
-# A download site's tag at the end: "(Z-Library)", "(z-lib.org)", "[libgen.li]", "(Anna's Archive)".
-SITE_TAG = re.compile(r"\s*[(\[]\s*(?:z-?lib(?:rary)?(?:\.\w+)?|libgen(?:\.\w+)?|anna['’]s archive)\s*[)\]]\s*$", re.IGNORECASE)
+# A download site’s tag at the end: "(Z-Library)", "(z-lib.org)", "[libgen.li]", "(Anna’s Archive)",
+# and the multi-domain mirror list newer Z-Library downloads use: "(z-library.sk, 1lib.sk, z-lib.sk)".
+SITE_TAG = re.compile(
+    r"\s*[(\[]\s*(?:z-?lib(?:rary)?|1lib|libgen|anna[‘’]s archive)(?:\.\w+)?(?:\s*,\s*\S+)*\s*[)\]]\s*$",
+    re.IGNORECASE,
+)
+# OceanofPDF names a file "_OceanofPDF.com_Title_-_Author" (underscores become spaces above).
+OCEAN_PREFIX = re.compile(r"^\s*OceanofPDF\.com\s+", re.IGNORECASE)
 # Library Genesis names a file "Author - Title (Year, Publisher) - libgen.li", sometimes with "-1" after it.
 LIBGEN_TAG = re.compile(r"\s+-\s+libgen(?:\.\w+)?(?:-\d+)?\s*$", re.IGNORECASE)
 YEAR_AND_PUBLISHER = re.compile(r"\s*\(\s*\d{4}\s*(?:,[^()]*)?\)\s*$")
@@ -63,6 +69,12 @@ def title_from_file_name(stem: str) -> tuple[str | None, str | None]:
     discernment (2004, Whitaker House ) - libgen.li-1" → ("Sharpen your discernment", "Roberts Liardon"). The title
     is None when the name has no word in it."""
     name = stem.replace("_", " ")
+    if m := OCEAN_PREFIX.match(name):
+        rest = name[m.end():]
+        title_part, sep, author_part = rest.rpartition(" - ")
+        if sep and A_WORD.search(title_part):
+            return re.sub(r"\s+", " ", title_part).strip(), author_part.strip() or None
+        name = rest
     if m := LIBGEN_TAG.search(name):
         author, dash, title = YEAR_AND_PUBLISHER.sub("", name[: m.start()]).partition(" - ")
         if dash and A_WORD.search(title):

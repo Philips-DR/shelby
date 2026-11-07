@@ -99,6 +99,11 @@ def test_a_label_read_as_text_does_not_swallow_the_chapter_s_first_numbered_sect
     ("Roberts Liardon - Sharpen your discernment (2004, Whitaker House ) - libgen.li-1",
      "Sharpen your discernment", "Roberts Liardon"),
     ("Rivers of Light (2004) - libgen.li", "Rivers of Light", None),
+    ("Overcoming Addictive Behavior The Victory Over the Darkness Series"
+     " (Neil T. Anderson [Anderson, Neil T.]) (z-library.sk, 1lib.sk, z-lib.sk)",
+     "Overcoming Addictive Behavior The Victory Over the Darkness Series", "Neil T. Anderson"),
+    ("_OceanofPDF.com_The_King_Is_Coming_-_John_Bevere", "The King Is Coming", "John Bevere"),
+    ("_OceanofPDF.com_Great_Expectations_-_Charles_Dickens", "Great Expectations", "Charles Dickens"),
     ("the_long_valley", "the long valley", None),
     ("2609.09153v1", None, None),  # no word in it
 ])

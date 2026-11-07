@@ -118,7 +118,10 @@ Run everything from this folder: `output/`, `voices/`, `.cache/` and `.env` are 
 and the background jobs do this themselves).
 
 `--voice` takes a saved voice's name (`abigail`, `tina`), a `.safetensors` path, an audio file to
-clone, or a preset like `alba`. Output goes to `output/<pdf name>/`. `--chapters` uses the numbers shown by `preview`.
+clone, or a preset like `alba`. Output goes to `output/<title>/`, the title read from the file name with download
+sites' tags taken off (`operations.output_dir`, `names.title_from_file_name`: Z-Library's mirror lists, OceanofPDF's
+`_OceanofPDF.com_Title_-_Author`); a plain name (`final-quest`, `2609.09153v1`) stays as it is, and a book that already
+has a folder under its PDF's own name keeps using it. `--chapters` uses the numbers shown by `preview`.
 `--speed` (0.5–2.0, **default 0.95** — the user's choice) is ffmpeg `atempo` applied at encode time — pitch
 unchanged, and speech comes from the chunk cache, so a new speed costs seconds, not a re-render.
 

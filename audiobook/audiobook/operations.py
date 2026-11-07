@@ -29,7 +29,13 @@ class PreviewResult:
 
 
 def output_dir(pdf: Path) -> Path:
-    return Path("output") / pdf.stem
+    title, _ = title_from_file_name(pdf.stem)
+    folder = Path("output") / (title or pdf.stem)
+    if folder.name != pdf.stem:
+        old = Path("output") / pdf.stem
+        if old.is_dir() and not folder.exists():
+            return old
+    return folder
 
 
 def plan_book(pdf: Path) -> BookPlan:
@@ -301,7 +307,7 @@ def _book_files(folder: Path) -> list[Path]:
 def working_on(book: str, jobs_dir: Path) -> str | None:
     """What is being done to this book right now ("render" or "analyse"), or None."""
     job = background.current(jobs_dir)
-    if job is not None and job.kind in BOOK_JOBS and Path(job.target).stem == book:
+    if job is not None and job.kind in BOOK_JOBS and output_dir(Path(job.target)).name == book:
         return job.kind
     return None
 

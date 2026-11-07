@@ -25,6 +25,25 @@ def analysed(monkeypatch, tmp_path):
     return pdf
 
 
+def test_output_dir_uses_the_cleaned_title(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    clean = operations.output_dir(Path("Overcoming Addictive Behavior (Author [A, B]) (z-library.sk, 1lib.sk).pdf"))
+    assert clean == Path("output/Overcoming Addictive Behavior")
+    clean = operations.output_dir(Path("_OceanofPDF.com_The_King_Is_Coming_-_John_Bevere.pdf"))
+    assert clean == Path("output/The King Is Coming")
+    assert operations.output_dir(Path("final-quest.pdf")) == Path("output/final-quest")
+    assert operations.output_dir(Path("2609.09153v1.pdf")) == Path("output/2609.09153v1")
+
+
+def test_output_dir_falls_back_to_old_folder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    old = tmp_path / "output" / "Big Title (Author [A, B]) (Z-Library)"
+    old.mkdir(parents=True)
+    (old / "01-opening-0.95x.mp3").write_bytes(b"x")
+    result = operations.output_dir(Path("Big Title (Author [A, B]) (Z-Library).pdf"))
+    assert result.name == "Big Title (Author [A, B]) (Z-Library)"
+
+
 def test_selection_of_chapters():
     assert operations.parse_selection("1-3,5", 6) == [1, 2, 3, 5]
     assert operations.parse_selection(" 2 ", 6) == [2]

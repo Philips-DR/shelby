@@ -32,7 +32,7 @@ from pathlib import Path
 
 from . import background
 from .names import SPEED_AND_SUFFIX
-from .operations import book_names
+from .operations import book_names, output_dir
 
 OUTPUT = Path("output")
 VOICES = Path("voices")
@@ -103,7 +103,7 @@ def _log_text(jobs_dir: Path, job_id: str) -> str:
 def inventory(jobs_dir: Path) -> dict:
     items: list[dict] = []
     running = background.current(jobs_dir)
-    busy = Path(running.target).stem if running and running.kind in ("render", "analyse") else None
+    busy = output_dir(Path(running.target)).name if running and running.kind in ("render", "analyse") else None
     finished_now = {Path(p).name for p in running.outputs} if running and running.kind == "render" else set()
 
     for folder in sorted(p for p in OUTPUT.iterdir() if p.is_dir() and not p.is_symlink() and p != SAMPLES) \
