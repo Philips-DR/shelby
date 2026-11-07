@@ -1,6 +1,11 @@
 # Shelby
 
-An assistant and the tools it runs, in one folder, started with one command.
+My personal AI assistant and the tools it runs, in one folder, started with one command.
+
+**My design, built with Claude Code as a pair programmer.** I defined the system architecture, the rules every
+part must follow and the features myself, and reviewed and tested every change. The architecture is below; the
+rules are in [`CLAUDE.md`](CLAUDE.md) and each tool's own `CLAUDE.md`, and the decisions, with the reasons for
+each, are in [`plan.md`](plan.md).
 
 Where it stands and what comes next: [`plan.md`](plan.md). Rules for working on it:
 [`CLAUDE.md`](CLAUDE.md).
