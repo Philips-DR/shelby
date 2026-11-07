@@ -10,7 +10,8 @@ against 1.35 s, every word right when Whisper read it back (7 runs of 7), and li
 0.953 against 0.957. Kyutai's optional torchao made it six times slower here and is not used. On an NVIDIA card
 it is the full model: dynamic 8-bit is a processor technique.
 
-Nothing is written: the audio comes back as base64 in the result.
+Nothing is written but a timestamp: the audio comes back as base64 in the result, and each call touches
+`workers.SPEAKING_MARK`, so a render running beside it makes one piece at a time while a reply is being read.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import io
 import subprocess
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -29,6 +31,7 @@ import numpy as np
 from .chunk import chunk_paragraph
 from .speech import for_speech
 from .tts import PRESETS, VOICES_DIR, load_speaking_model, resolve_voice, to_array
+from .workers import SPEAKING_MARK
 
 MAX_SPEAK_CHARS = 600
 SPEAK_IDLE_SECONDS = 600
@@ -70,8 +73,9 @@ class Speaker:
     """One Pocket TTS, kept loaded between replies and released when they stop coming."""
 
     def __init__(self, idle_seconds: float = SPEAK_IDLE_SECONDS, load: Callable[[], Any] = _load_model,
-                 encode: Callable[[np.ndarray, int], bytes] = _mp3) -> None:
+                 encode: Callable[[np.ndarray, int], bytes] = _mp3, mark: Path = SPEAKING_MARK) -> None:
         self.idle_seconds = idle_seconds
+        self.mark = mark
         self._load = load
         self._encode = encode
         self._lock = threading.Lock()
@@ -91,6 +95,11 @@ class Speaker:
         if not any(c.isalnum() for c in spoken):
             raise ValueError("there is nothing in that to say")
         name = voice or default_voice()
+        try:  # a render running beside this makes one piece at a time for a while (workers.py)
+            self.mark.parent.mkdir(parents=True, exist_ok=True)
+            self.mark.touch()
+        except OSError:
+            pass
         if name not in PRESETS and not (VOICES_DIR / f"{name}.safetensors").exists():
             raise FileNotFoundError(f"no voice called {name}")
         with self._lock:

@@ -63,14 +63,23 @@ def load_model():
     return model
 
 
+def eight_bit_here() -> bool:
+    """Whether speech is made by the 8-bit model on this machine: yes on the processor, no on an NVIDIA card (dynamic
+    8-bit is a processor technique)."""
+    import torch
+
+    return not torch.cuda.is_available()
+
+
 def load_speaking_model():
-    """Pocket TTS for speaking a chat reply while someone waits (speaking.py), kept apart from `load_model`'s.
-    On the processor it is the 8-bit model, measured 2.0x real time against 1.38x on this laptop; on a card it
-    is the full model, since dynamic 8-bit is a processor technique."""
+    """Pocket TTS as books and chat replies are spoken (2026-11-06): the 8-bit model on the processor. Measured on this
+    laptop with abigail: 2.0x real time against the full model's 1.38x, likeness 0.953 against 0.957, every word right,
+    and the user heard no difference. Not cached here: a caller that keeps it (speaking.py) also lets it go."""
     import torch
     from pocket_tts import TTSModel
 
-    model = TTSModel.load_model(quantize=not torch.cuda.is_available())
+    print("Loading Pocket TTS...")  # background.read_progress looks for it
+    model = TTSModel.load_model(quantize=eight_bit_here())
     place(model, torch)
     return model
 
@@ -97,33 +106,49 @@ def resolve_voice(voice: str) -> str:
 
 
 class Narrator:
-    def __init__(self, voice: str):
-        self.model = load_model()
-        self.sample_rate: int = self.model.sample_rate
+    """A voice, ready to speak. Its model is loaded when it first speaks, so a render whose pieces are made in worker
+    processes (workers.py) holds no copy of its own. `fast` (the default) is the 8-bit model; `variant` says which
+    model's pieces these are, so the chunk cache keeps them apart (render.py)."""
+
+    def __init__(self, voice: str, fast: bool = True):
+        self.fast = fast
+        self.sample_rate: int = SAMPLE_RATE
+        self.variant = "-int8" if fast and eight_bit_here() else ""
+        self._model = None
+        self._state = None
 
         voice_path = Path(resolve_voice(voice))
         if not voice_path.exists():
             # A built-in preset name such as "alba".
-            self.voice_id = voice
-            self.state = self.model.get_state_for_audio_prompt(voice)
+            self.voice_id = self.prompt = voice
             return
 
         self.voice_id = f"{voice_path.stem}-{file_hash(voice_path)}"
         if voice_path.suffix == ".safetensors":
             # An already-cloned voice, e.g. voices/abigail.safetensors.
-            self.state = self.model.get_state_for_audio_prompt(str(voice_path))
+            self.prompt = str(voice_path)
             return
 
         cached = VOICES_DIR / f"{self.voice_id}.safetensors"
-        if cached.exists():
-            self.state = self.model.get_state_for_audio_prompt(str(cached))
-            return
+        if not cached.exists():
+            VOICES_DIR.mkdir(exist_ok=True)
+            reference = VOICES_DIR / f"{self.voice_id}.wav"
+            prepare_reference(voice_path, reference)
+            print(f"Cloning voice from {voice_path}...")
+            clone(reference, cached)
+        self.prompt = str(cached)
 
-        VOICES_DIR.mkdir(exist_ok=True)
-        reference = VOICES_DIR / f"{self.voice_id}.wav"
-        prepare_reference(voice_path, reference)
-        print(f"Cloning voice from {voice_path}...")
-        self.state = clone(reference, cached)
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = load_speaking_model() if self.fast else load_model()
+        return self._model
+
+    @property
+    def state(self):
+        if self._state is None:
+            self._state = self.model.get_state_for_audio_prompt(self.prompt)
+        return self._state
 
     def synthesize(self, text: str) -> np.ndarray:
         return to_array(self.model.generate_audio(self.state, text))

@@ -82,6 +82,7 @@ def test_audio_made_on_a_gpu_comes_back_as_numbers(monkeypatch):
     model = SimpleNamespace(sample_rate=24000, get_state_for_audio_prompt=lambda voice: {"voice": voice},
                             generate_audio=lambda state, text: GpuAudio([0.25, -0.5]))
     monkeypatch.setattr(tts, "load_model", lambda: model)
+    monkeypatch.setattr(tts, "load_speaking_model", lambda: model)  # what a Narrator speaks with by default
     with pytest.raises(TypeError):
         GpuAudio([0.0]).numpy()
     spoken = tts.Narrator("alba").synthesize("Hello.")

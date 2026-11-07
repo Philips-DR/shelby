@@ -81,8 +81,8 @@ The user chose **Pocket TTS** and wants voices **cloned** from a reference clip 
   hurts; `temp` and decode steps don't help (defaults best). **Prompts over ~30 s break generation**
   (no EOS, similarity 0.71) — `voice add` must cap at 30 s. User rated v1 (0.95) "80% like her".
 - Measured on this machine: model load ~8 s (first run also downloads weights), voice cloning
-  ~2.5 s, generation ~1.4× real-time. A 10-hour book takes roughly 7 hours to render, hence the
-  chunk cache.
+  ~2.5 s, generation ~1.4× real-time with the full model, so a 10-hour book took roughly 7 hours to render, hence the
+  chunk cache. Renders are 8-bit and two pieces at a time since 2026-11-06: see "Faster renders".
 
 ## Other TTS engines considered
 
@@ -168,9 +168,55 @@ never shows it to the model, and it is read-only.
 - **The same text rules as a book** (`speech.for_speech`), so a number or a run of capitals reads as it does in a
   render. A text with nothing to say, over the limit, or naming a voice that does not exist is refused before any
   model loads. The default voice is abigail where it exists, else the preset alba.
-- **Not for books, and renders are unchanged**: they still load the full model in their own process. Whether renders
-  should also use 8-bit (and two at once) is step 4 of the user's voice plan (`../plan.md`, Next steps).
+- **Not for books**: a render loads its own models in its own process (see "Faster renders"). It reads the mark
+  `speak` touches on every call (`.cache/speaking`), and makes one piece at a time while a reply is being read.
 - **Not listened to by ear** by whoever built it; the user's ear is the last check.
+
+## Faster renders (2026-11-06)
+
+A render speaks with the 8-bit model and, on the processor, makes two pieces at a time. The user chose 8-bit after
+listening to the same passage from both models ("i think they are the same").
+
+- **Measured on a whole chapter**: chapter 4 of `2609.09153v1.pdf` (8 min 20 s of audio, 32 pieces, abigail), with
+  this laptop busy (load 3-7). One piece at a time took 231 s, 2.18x real time; two at a time 212 s, 2.36x. The full
+  model is 1.38x, so a 10-hour book goes from about 7.2 hours to about 4.2. `preview`'s estimate is 2.0x
+  (`RENDER_SPEED`, was 1.4).
+- **The second worker is worth less than the bench said.** Idle, two copies made 2.84x between them against one's
+  2.0x (+42%); on the real chapter with the laptop busy it was +8%. A third copy added nothing even idle (the memory
+  bus is the limit by then). Each copy holds about 0.85 GB. Two is the default; one on an NVIDIA card or with under
+  2.4 GB free; `AUDIOBOOK_RENDER_WORKERS` sets another number. The job's log says which ("Rendering 2 pieces at a time.").
+- **How** (`workers.py`): Pocket TTS keeps itself to one processor thread, so one render left most of the laptop idle.
+  Each worker is its own process with its own model (Pocket TTS is not thread-safe), started with `spawn`, never
+  `fork` (a forked copy of a process that has loaded torch can hang). The render's own process loads no model at all
+  (`Narrator` loads only when it first speaks). A chapter's missing pieces are made first, each returned with its own
+  text and kept in the chunk cache; then the chapter is put together from the cache in its own order, exactly as a
+  one-at-a-time render does, so the order never depends on which piece finished first.
+- **While a reply is read aloud in Chat, a render makes one piece at a time**: `speak` touches `.cache/speaking`, and
+  the render checks it before each piece, for 30 s after. Three copies at once slowed each to 0.96x real time, the
+  edge of a reply stuttering.
+- **The chunk cache keeps the two models apart**: 8-bit pieces in `.cache/audio/<voice id>-int8/`, the full model's
+  where they always were. A chapter is spoken from the full model's pieces when every one is there (so a book rendered
+  before re-encodes at a new speed for nothing and sounds as it did); otherwise the whole chapter is made in 8-bit, and
+  one chapter never mixes the two. The cost: a chapter the full model had half made is made again, all of it.
+- **Progress counts each piece once**, as it is made. Time left comes from the wall time between finished pieces, so
+  it reflects two at a time; it counts only what the chapters' chosen models still lack.
+- **A worker's output is flushed after it loads.** Otherwise "Loading Pocket TTS..." reached the job's log only when
+  the render ended, and the job said "starting" instead of "loading the voice model" (`background.read_progress`).
+- **Each model load prints PyTorch's warning** that quantized tensors (`torch.quantize_per_tensor`) are deprecated,
+  once per worker. Harmless today. It means a later PyTorch may drop what 8-bit Pocket TTS uses: torch is pinned, and
+  an upgrade must be checked with an 8-bit render.
+- **Pocket TTS warns of its own limit**: "Chunk has 58 tokens (max 50), generation may skip words", for one long
+  sentence of that chapter, in both renders. Not new and not changed here: by Pocket TTS's own account, a sentence
+  that long may lose words with either model.
+- **Whisper read each render of that chapter back** against its text (1131 words). Matching in order: two at a time
+  1037 (91.7%), one at a time 1035 (91.5%), and the full model, rendered for this comparison, 1018 (90.0%). So 8-bit
+  loses no words the full model keeps. In the two-at-a-time render, where every difference was listed, most were maths
+  read aloud. Paragraphs' first words were found in order about equally (19, 18 and 18 of 22). One sentence's end
+  ("compares these construction strategies") was missing from the two-at-a-time render only. Each piece is made
+  afresh, and Pocket TTS samples, so one render can differ from the next; a worker hands back the whole piece it made.
+- **Run:** 19 deliberate breaks of the new code, each caught by a test (two only after a test was added: progress
+  counting a chapter the full model had already made, and the worker's buffered log line).
+- **Not listened to by ear** as a whole chapter: the user compared one short passage. The user's ear is the last check.
 
 ## Code layout
 
@@ -197,8 +243,9 @@ never shows it to the model, and it is read-only.
 - `audiobook/__main__.py` — CLI and `.env` loading.
 - `audiobook/chunk.py` — sentence chunks ≤400 chars. `audiobook/tts.py` — model loaded once per
   process and placed on a GPU when there is one (`place`), `Narrator`, `resolve_voice`, `to_array`. `audiobook/render.py` — speaks a plan `Chapter` with pauses,
-  caches each chunk in `.cache/audio/<voice id>/<text hash>.npy`, reports `Progress` (with time
-  left) through a callback, encodes MP3/M4B.
+  caches each chunk in `.cache/audio/<voice id>[-int8]/<text hash>.npy`, reports `Progress` (with time
+  left) through a callback, encodes MP3/M4B. `audiobook/workers.py` — how many pieces a render makes at once, and
+  the worker processes that make them.
 - `tests/` — rule unit tests; golden `tests/golden/paper.preview.md` from
   `tests/fixtures/paper.docling.json.gz`. Accept an intended change with `UPDATE_GOLDEN=1` and
   **read the diff** before committing it.

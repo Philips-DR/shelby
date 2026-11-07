@@ -4,10 +4,11 @@ from collections import defaultdict
 
 from .plan import BookPlan, Chapter
 
-# Measured with Pocket TTS and the abigail voice: ~16 characters of text per second of speech,
-# generated at ~1.4x real time on this machine.
+# Measured with Pocket TTS and the abigail voice: ~16 characters of text per second of speech.
 CHARS_PER_SECOND = 16
-RENDER_SPEED = 1.4
+# x real time, on this laptop with the 8-bit model: a whole chapter took 2.18x one piece at a time and 2.36x two at a
+# time, with the laptop busy (the full model was 1.4x). A render measures its own rate after its first 500 characters.
+RENDER_SPEED = 2.0
 EXAMPLES_PER_REASON = 3
 
 

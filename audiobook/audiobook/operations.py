@@ -92,11 +92,16 @@ def render_pdf(
     bad = [n for n in selected if not 1 <= n <= len(plan.chapters)]
     if bad:
         raise ValueError(f"no chapter {bad[0]}: this book has {len(plan.chapters)}")
+    from .workers import workers_here
+
     narrator = Narrator(voice)
+    workers, why = workers_here()
+    print(f"Rendering {why}.", flush=True)
     return render_book(
         [(n, plan.chapters[n - 1]) for n in selected], narrator, out_dir or output_dir(pdf), plan.title, m4b, speed,
         on_progress=on_progress, on_chapter_done=on_chapter_done,
         labels={"voice": voice, "pdf": str(pdf), **({"author": plan.author} if plan.author else {})},
+        workers=workers,
     )
 
 

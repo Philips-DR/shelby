@@ -1,7 +1,7 @@
 # Procedural Graphs: Self-Evolving Execution Structures for LLM Agents
 
 Source: `2609.09153v1.pdf`  
-13 chapters · ~1 h 18 min of speech · ~56 min to render on this machine
+13 chapters · ~1 h 18 min of speech · ~39 min to render on this machine
 
 | # | Chapter | Words | Speech | |
 |---|---|---|---|---|

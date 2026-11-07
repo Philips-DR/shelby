@@ -151,6 +151,12 @@ def test_a_render_writes_down_beside_each_chapter_exactly_what_it_says(tmp_path,
         def is_cached(self, text):
             return True
 
+        def choose(self, texts):
+            pass
+
+        def missing(self, texts):
+            return []
+
     monkeypatch.setattr(render, "ChunkRenderer", Voice)
     monkeypatch.setattr(render, "encode_mp3", lambda wav, mp3, *a: mp3.write_bytes(b"ID3"))
     told = []
