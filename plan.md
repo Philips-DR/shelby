@@ -783,18 +783,23 @@ Decisions or input only the user can give. Don't guess these.
      whole chapter (see "Built and verified"). Deployed and pushed 11-07.
    - ~~**Rename `suite` to `shelby`, everything.**~~ Done 11-07 (see "Built and verified"). The old GitHub address
      forwards for as long as no new repo named `suite` is made under the account.
-   - **The portfolio, last** (`~/Documents/portfolio`, live at philip-portfolio-five.vercel.app). **Done 11-07:** the
-     site's résumé is the African Languages Lab CV with a Shelby entry (the user's words: his architecture, rules and
+   - ~~**The portfolio, last**~~ (`~/Documents/portfolio`, live at philip-portfolio-five.vercel.app). **Done 11-07, live:**
+     the site's résumé is the African Languages Lab CV with a Shelby entry (the user's words: his architecture, rules and
      features, built with Claude Code as a pair programmer) and without "Repositories are private", 3 pages; the title
-     follows it; Shelby's README and GitHub description say the same. **Still to do:** Shelby's case study in place of
-     docu-ai's (the user said go; needs his "What I'd do differently"), and three sections drafted in September and
-     never confirmed (Akan pipeline's and the voice survey's "What I'd do differently", the survey's results).
-     `voice-ai-survey-platform` (the user: "built by me, keep it public but no information about the company"): its
-     first commit named the client (Demeter Ghana, BM270), the client's survey script, AyaSpeech and two company
-     servers; the repo was recreated 11-07 public with one clean commit (the old one is private as
-     `voice-ai-survey-platform-old`, for the user to delete; the token here cannot), and its README no longer says
-     "client engagement". `~/Documents/ayaspeech-demeter-survey-main` still holds the old history and pushes to that
-     name: never push from it. `personal-ai-main`: the user says it is deprecated; private or archived is his call.
+     follows it; Shelby's case study replaced docu-ai's (`/work/docu-ai` redirects to it); the user said "live" after
+     reading a Vercel preview of the branch (a branch push builds a private preview, only `main` is production). It ends
+     with "Where it stands" in place of "What I'd do differently": the user said the system is not done and more
+     upgrades are coming. 22 browser checks pass against the live address, axe clean, five widths. The portfolio's
+     `CLAUDE.md` lost the passages about whether the survey platform was the employer's and about `personal-ai-main`'s
+     authors (still in the repo's history, which stays public). **Still open:** three sections drafted in September and
+     never confirmed by the user, live on the site and marked `CONFIRM (Philip)` in the source: the Akan pipeline's
+     "What I'd do differently", and the voice survey's "Results" and "What I'd do differently"; and when Shelby has
+     changed enough, its case study's numbers.
+     Repos: `voice-ai-survey-platform` recreated 11-07 public with one clean commit (its first one named the client,
+     the client's survey script, AyaSpeech and two company servers); the old history is private as
+     `voice-ai-survey-platform-old`, **for the user to delete** (the token here lacks `delete_repo`).
+     `~/Documents/ayaspeech-demeter-survey-main` still holds the old history and pushes to the public name: never push
+     from it. `personal-ai-main` archived 11-07 (the user: deprecated), still public.
    - Left for its own change: axe's `label-content-name-mismatch` on the sidebar's `Jump to` button.
 
 1. ~~**Postgres (layer 1 of the database plan).**~~ Built 2026-10-28, committed (`78fb441`) and the real import run 2026-10-29 (see "Built and verified").
