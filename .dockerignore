@@ -22,6 +22,7 @@ assistant/lexicon.json
 meet-ai/audio
 meet-ai/transcripts
 meet-ai/models
+meet-ai/.cache
 mail-ai/*.sqlite3
 audiobook/output
 audiobook/.cache

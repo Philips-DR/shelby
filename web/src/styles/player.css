@@ -14,12 +14,12 @@
 /* ---- the full player ------------------------------------------------------------------------- */
 
 .player {
-  container: player / inline-size;   /* its controls fit the player's width, not the window's (see the end) */
+  container: player / inline-size;
   display: grid;
   gap: 8px;
   margin-top: 12px;
   padding: 14px 16px 12px;
-  background: var(--bg-2);
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--pa, var(--brand)) 10%, var(--bg-2)) 0%, var(--bg-2) 70px);
   border: 1px solid var(--line);
   border-radius: 20px;
   animation: pop-in var(--dur-3) var(--ease);
@@ -28,6 +28,30 @@
 .player-resume { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--ink-2); }
 .player-close { width: 32px; min-height: 32px; }
 .player-failed { margin: 4px 0; color: var(--bad); font-size: var(--fs-sm); }
+
+/* ---- track identity: book and chapter title ---- */
+
+.player-id { display: flex; flex-direction: column; gap: 2px; }
+.player-id-book {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pa-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: fade-in var(--dur-2) var(--ease) both;
+}
+.player-id-title {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: fade-in var(--dur-2) var(--ease) both;
+}
 
 /* a text-like button: the length, "Start over" */
 button.plink {
@@ -60,7 +84,17 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
 .player-wave svg { display: block; overflow: visible; }
 .wave-rest rect { fill: color-mix(in srgb, var(--ink-3) 42%, transparent); }
 .wave-played rect { fill: var(--pa-ink); }
-.wave-played { clip-path: inset(0 calc((1 - var(--progress, 0)) * 100%) 0 0); }
+/* soft 10px fade at the playhead boundary — blurs the edge rather than cutting it */
+.wave-played {
+  -webkit-mask-image: linear-gradient(to right,
+    black calc(var(--progress, 0) * 100% - 10px),
+    transparent calc(var(--progress, 0) * 100%)
+  );
+  mask-image: linear-gradient(to right,
+    black calc(var(--progress, 0) * 100% - 10px),
+    transparent calc(var(--progress, 0) * 100%)
+  );
+}
 
 .playhead {
   position: absolute;
@@ -72,6 +106,7 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
   background: var(--ink);
   border-radius: 2px;
   pointer-events: none;
+  transition: background-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
 }
 .playhead::after {                         /* the grab handle: shown when there is something to grab */
   content: '';
@@ -86,9 +121,12 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
   border-radius: 50%;
   box-sizing: content-box;
   transform: scale(0);
-  transition: transform var(--dur-2) var(--ease);
+  transition: transform var(--dur-2) var(--ease), background-color var(--dur-2) var(--ease);
 }
 .player-wave:hover .playhead::after, .player-wave:focus-visible .playhead::after, .player-wave:active .playhead::after { transform: scale(1); }
+/* while playing: glow the playhead in the tool colour */
+[data-state='playing'] .playhead { background: var(--pa-ink); box-shadow: 0 0 10px 3px var(--pa-soft); }
+[data-state='playing'] .playhead::after { background: var(--pa-ink); }
 .hoverline { position: absolute; top: 0; bottom: 0; left: var(--x); width: 1px; background: var(--ink-3); opacity: 0.5; pointer-events: none; }
 .hovertime {
   position: absolute;
@@ -117,12 +155,11 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
 .player-times { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .player-times > span { padding: 2px 6px; }
 
-/* ---- the controls ---- */
+/* ---- the controls: main playback row (centered) + secondary row (speed, volume, sleep) ---- */
 
-.player-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
-.pc-side { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.pc-right { justify-content: flex-end; }
+.player-controls { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 2px; }
 .pc-main { display: flex; align-items: center; gap: 10px; }
+.pc-aux { display: flex; align-items: center; justify-content: space-between; align-self: stretch; padding-top: 8px; border-top: 1px solid var(--line); }
 .pc-volume { display: inline-flex; align-items: center; gap: 2px; }
 
 .pskip {
@@ -150,14 +187,23 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
   border: 0;
   border-radius: 50%;
   box-shadow: var(--shadow-1);
-  transition: transform var(--dur-2) var(--ease), box-shadow var(--dur-3) var(--ease), background-color var(--dur-1) var(--ease);
+  transition: transform var(--dur-2) var(--ease), background-color var(--dur-1) var(--ease);
 }
 .pplay:hover:not(:disabled) { background: var(--ink); border: 0; transform: scale(1.05); }
 .pplay:active:not(:disabled) { transform: scale(0.95); }
 .pplay:disabled { opacity: 1; cursor: progress; }
-[data-state='playing'] .pplay { box-shadow: 0 0 0 6px var(--pa-soft), var(--shadow-1); }
+/* while playing: a breathing glow ring in the tool's colour */
+@keyframes player-ring {
+  0%, 100% { box-shadow: 0 0 0 5px var(--pa-soft), var(--shadow-1); }
+  50%       { box-shadow: 0 0 0 10px var(--pa-soft), var(--shadow-1); }
+}
+[data-state='playing'] .pplay { animation: player-ring 2.5s ease-in-out infinite; }
 .pplay-icon { display: grid; place-items: center; animation: pop var(--dur-2) var(--ease); }
 .pspin { position: absolute; inset: -5px; border: 3px solid transparent; border-top-color: var(--pa-ink); border-radius: 50%; animation: spin calc(var(--dur-3) * 2) linear infinite; }
+
+/* step buttons (previous/next chapter) are slightly smaller than the skip buttons */
+.pskip.pstep { width: 44px; min-height: 44px; }
+.player-controls[data-steps] .pc-main { gap: 6px; }
 
 .pchip {
   gap: 6px;
@@ -219,49 +265,32 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
 .pswitch input[type='checkbox']:checked::after { transform: translateX(16px); }
 .player-notice { font-size: var(--fs-sm); color: var(--ink-2); }
 
-/* A player in a narrow column of a wide window had no room: beside the Render card (about 400px) the sleep
-   button slid over Forward 30, and in the side column (170-320px, a file from an earlier reading) every control
-   sat on another. So the controls follow the player's own width: the volume slider goes first (the computer's
-   own volume is still there), then the mute button, with speed and sleep moving under the three big buttons;
-   at the narrowest those shrink a little. */
-@container player (max-width: 600px) { .pvolume { display: none; } }
-@container player (max-width: 400px) { .pc-volume { display: none; } }
-@container player (max-width: 330px) {
-  .player-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'main main' 'speed sleep'; row-gap: 6px; }
-  .pc-main { grid-area: main; justify-content: center; }
-  .pc-side:not(.pc-right) { grid-area: speed; }
-  .pc-right { grid-area: sleep; }
+/* Responsive: volume slider hides first, then the whole control, then the main controls
+   shrink. The step buttons add ~100px to the main row but the flex layout handles it. */
+@container player (max-width: 460px) { .pvolume { display: none; } }
+@container player (max-width: 360px) { .pc-volume { display: none; } }
+@container player (max-width: 310px) {
+  .pc-main { gap: 4px; }
+  .pskip { width: 44px; min-height: 44px; }
+  .pplay { width: 56px; height: 56px; }
 }
-@container player (max-width: 220px) {
+@container player (max-width: 250px) {
   .pc-main { gap: 2px; }
   .pskip { width: 40px; min-height: 40px; }
-  .pplay { width: 52px; height: 52px; }
+  .pskip.pstep { width: 36px; }
+  .pplay { width: 50px; height: 50px; }
 }
-
-/* A chapter of a book also has the previous and next buttons, either side of the three big ones. That makes the
-   middle 92px wider, so every step above moves up by that much for it (330, 400 and 600 become 422, 492 and 692),
-   and below 290px the buttons shrink a step earlier. */
-.pskip.pstep { width: 44px; min-height: 44px; }
-.player-controls[data-steps] .pc-main { gap: 6px; }
-@container player (max-width: 692px) { .player-controls[data-steps] .pvolume { display: none; } }
-@container player (max-width: 492px) { .player-controls[data-steps] .pc-volume { display: none; } }
-@container player (max-width: 422px) {
-  .player-controls[data-steps] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'main main' 'speed sleep'; row-gap: 6px; }
-  .player-controls[data-steps] .pc-main { grid-area: main; justify-content: center; }
-  .player-controls[data-steps] .pc-side:not(.pc-right) { grid-area: speed; }
-  .player-controls[data-steps] .pc-right { grid-area: sleep; }
+@container player (max-width: 210px) {
+  .pc-main { gap: 0; }
+  .pskip { width: 36px; min-height: 36px; }
+  .pskip.pstep { width: 32px; }
+  .pplay { width: 44px; height: 44px; }
 }
-@container player (max-width: 290px) {
-  .player-controls[data-steps] .pc-main { gap: 2px; }
-  .player-controls[data-steps] .pskip { width: 40px; min-height: 40px; }
-  .player-controls[data-steps] .pskip.pstep { width: 36px; }
-  .player-controls[data-steps] .pplay { width: 52px; height: 52px; }
-}
-@container player (max-width: 220px) {
-  .player-controls[data-steps] .pc-main { gap: 0; }
-  .player-controls[data-steps] .pskip { width: 36px; min-height: 36px; }
-  .player-controls[data-steps] .pskip.pstep { width: 32px; }
-  .player-controls[data-steps] .pplay { width: 48px; height: 48px; }
+@container player (max-width: 185px) {
+  .pc-main { gap: 0; }
+  .pskip { width: 30px; min-height: 30px; }
+  .pskip.pstep { width: 26px; }
+  .pplay { width: 38px; height: 38px; }
 }
 
 .pmenu { position: relative; }

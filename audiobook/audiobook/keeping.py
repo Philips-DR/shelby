@@ -76,6 +76,9 @@ def _chapter(book: str, mp3: Path) -> dict | None:
         "speed": float(match["speed"]) if match["speed"] else 1.0,
         **{k: written[k] for k in ("author", "voice", "pdf", "seconds") if k in written},
     }
+    if written.get("segments"):
+        from .render import compact_timing
+        labels["timing"] = compact_timing(written["segments"])
     return {"kind": "chapter", "key": f"{book}/{mp3.name}", "labels": labels, "text": written.get("text"),
             "version": _version(mp3, side), "files": [{"path": str(mp3.resolve()), "role": "audio"}],
             "release": True}

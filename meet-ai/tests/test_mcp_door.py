@@ -56,10 +56,11 @@ def call(server, name, **arguments) -> dict:
 def test_the_door_advertises_exactly_its_operations(server):
     names = sorted(tool.name for tool in asyncio.run(server.list_tools()))
     assert names == [
-        "dictate", "generate_minutes", "generate_notes", "list_audio_sources", "list_recordings",
-        "preview_minutes", "preview_notes", "read_transcript", "read_written", "recording_status",
-        "start_recording", "start_transcription", "stop_recording", "transcribe",
-        "transcription_status",
+        "delete_audio", "delete_meeting", "dictate", "generate_minutes", "generate_notes",
+        "list_audio_sources", "list_recordings", "preview_minutes", "preview_notes",
+        "read_transcript", "read_written", "recording_status", "rename_audio",
+        "start_recording", "start_transcription", "stop_recording",
+        "transcribe", "transcription_status",
     ]
 
 

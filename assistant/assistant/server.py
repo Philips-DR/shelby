@@ -317,6 +317,11 @@ class UploadDeletion(BaseModel):
     id: str
 
 
+class UploadRename(BaseModel):
+    id: str
+    name: str
+
+
 class RecordDeletion(BaseModel):
     ids: list[str]
 
@@ -888,6 +893,20 @@ def create_app(
                            arguments={"id": gone["id"], "kind": gone["kind"], "name": gone["name"]},
                            outcome="ok", result=f"{gone['files']} file(s), {gone['bytes']} bytes", origin="button")
         return gone
+
+    @app.post("/api/uploads/rename")
+    async def rename_upload(body: UploadRename):
+        """Rename one upload by its id. Only buttons reach this."""
+        try:
+            result = await up.rename_upload(file_index, files_root, body.id, body.name)
+        except up.UploadError as error:
+            return refuse(error)
+        except OSError as error:
+            return refuse(up.UploadError(f"could not rename it: {error.strerror or error}"))
+        await audit.record(tool="assistant__rename_upload",
+                           arguments={"id": result["id"], "old": result["old_name"], "new": result["new_name"]},
+                           outcome="ok", result=result["new_name"], origin="button")
+        return result
 
     @app.get("/api/files/{file_id}")
     async def stored_file(file_id: str):

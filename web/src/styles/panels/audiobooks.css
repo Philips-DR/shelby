@@ -139,6 +139,13 @@
 .ab-reader .card-head { margin-bottom: 10px; }
 .ab-ch .ab-reader { margin: 4px 0 12px; background: var(--surface-2); box-shadow: none; }
 .ab-reader .reader { margin: 0; }
+.ab-reader .reader-text { scroll-behavior: smooth; }
+.ab-synced .ab-chunk { cursor: pointer; border-radius: 2px; transition: background-color 0.15s ease; }
+.ab-synced .ab-chunk:hover { background: var(--brand-soft); }
+.ab-synced .ab-chunk-on { background: var(--brand-soft); }
+.ab-synced .ab-timed { cursor: pointer; border-radius: 2px; transition: background-color 0.15s ease; }
+.ab-synced .ab-timed:hover { background: var(--brand-soft); }
+.ab-synced .ab-seg-on:not(:has(.ab-chunk)) { background: var(--brand-soft); }
 
 /* ---- render and listen: cards under the chapters, in one column; render folded to a line until asked for ------------- */
 
@@ -267,3 +274,7 @@
 }
 
 .ab-delete { margin-top: 8px; align-self: flex-start; }
+
+/* ---- follow along: the button under the player, and the line saying why it is not there ------------------------------ */
+.ab-follow-row { display: flex; margin: 4px 0 8px; }
+.ab-follow-note { margin: 4px 0 8px; }

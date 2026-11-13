@@ -5,11 +5,12 @@ import { useEffect, useRef, type CSSProperties } from 'react'
 import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock } from '../player/engine'
 import { clock, spoken } from '../player/format'
 import { askToShow } from '../player/showing'
-import { IconAudiobooks, IconClose, IconForward, IconPause, IconPlay, IconRewind } from './icons'
+import { IconAudiobooks, IconClose, IconForward, IconMeetings, IconPause, IconPlay, IconRewind } from './icons'
 import { toolColor } from '../charts/palette'
+import type { Section } from './sections'
 import '../styles/player.css'
 
-export function MiniPlayer({ goToBooks }: { goToBooks: () => void }) {
+export function MiniPlayer({ go }: { go: (section: Section) => void }) {
   const { track, playing, waiting, failed, fullViews } = usePlayer()
   const { time, duration } = usePlayerClock()
   const act = usePlayerActions()
@@ -19,13 +20,13 @@ export function MiniPlayer({ goToBooks }: { goToBooks: () => void }) {
   useEffect(() => (visible && root.current ? act.paintInto(root.current) : undefined), [act, visible])
 
   if (!track || !visible) return null
-  // Tapping it goes to where the audio is playing: the book, with that chapter in view. A file with no book of its
-  // own (the whole-book audio) has nowhere more particular than the page.
+  const page = track.page ?? 'audiobooks'
   const show = () => {
     if (track.home) askToShow(track.home)
-    goToBooks()
+    go(page)
   }
-  const where = track.home ? 'Show it playing in its book' : 'Open the audiobooks page'
+  const isMeeting = page === 'meetings'
+  const where = track.home ? 'Show it playing in its book' : isMeeting ? 'Open the meetings page' : 'Open the audiobooks page'
   const loading = waiting && !playing && !failed
   return (
     <div
@@ -34,12 +35,12 @@ export function MiniPlayer({ goToBooks }: { goToBooks: () => void }) {
       role="region"
       aria-label="Now playing"
       data-state={failed ? 'failed' : loading ? 'loading' : playing ? 'playing' : 'paused'}
-      style={{ '--pa': toolColor('audiobook') } as CSSProperties}
+      style={{ '--pa': toolColor(isMeeting ? 'meet-ai' : 'audiobook') } as CSSProperties}
     >
       <span className="mini-line" aria-hidden><i /></span>
       <button className="mini-info" onClick={show} title={where} aria-label={`${track.title}. ${where}`}>
         <span className="mini-tile" aria-hidden>
-          {playing ? <span className="mini-eq"><i /><i /><i /></span> : <IconAudiobooks size={17} strokeWidth={2} />}
+          {playing ? <span className="mini-eq"><i /><i /><i /></span> : isMeeting ? <IconMeetings size={17} strokeWidth={2} /> : <IconAudiobooks size={17} strokeWidth={2} />}
         </span>
         <span className="mini-text">
           <b>{track.title}</b>

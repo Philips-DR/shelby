@@ -11,6 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CONTINUE_KEY, PREFETCH_SECONDS, continuesFrom } from './queue'
 import { numeric, store } from './storage'
+import type { Section } from '../ui/sections'
 import { useWaveform, type Wave } from './waveform'
 
 export const BACK = 15
@@ -20,7 +21,7 @@ export const FORWARD = 30
 export interface Upcoming { title: string; load: () => Promise<Track> }
 /** Where a track is shown playing: a book (its PDF's path) and the chapter in it, so the docked player can take you there. */
 export interface Home { book: string; chapter: number }
-export interface Track { key: string; title: string; album?: string; blob: Blob; home?: Home; next?: Upcoming; previous?: Upcoming }
+export interface Track { key: string; title: string; album?: string; blob: Blob; home?: Home; page?: Section; next?: Upcoming; previous?: Upcoming }
 type Loaded = Track & { url: string }
 export interface Sleep { minutes: number; endsAt: number }
 
@@ -48,6 +49,8 @@ interface PlayerActions {
   close(): void
   toggle(): void
   seek(to: number): void
+  /** The audio's own time, right now, for a view that has to follow it closer than the clock's four times a second. */
+  now(): number
   skip(by: number): void
   setRate(rate: number): void
   setVolume(volume: number): void
@@ -315,6 +318,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         else el.pause()
       },
       seek,
+      now: () => audio.current?.currentTime ?? 0,
       skip: (by) => seek((audio.current?.currentTime ?? 0) + by),
       setRate: setRateState,
       setVolume: (v) => { setVolumeState(Math.min(1, Math.max(0, v))); setMuted(false) },

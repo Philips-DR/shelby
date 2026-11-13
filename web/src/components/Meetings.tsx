@@ -7,12 +7,14 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AUDIO_EXTS, deleteUpload, getUploads, isAudio, uploadAudio, type Uploads } from '../api'
+import { AUDIO_EXTS, deleteUpload, fetchMedia, fetchStored, getUploads, isAudio, renameUpload, uploadAudio, type Uploads } from '../api'
 import { canRecordInBrowser, useBrowserRecorder } from '../useBrowserRecorder'
 import { call } from '../call'
+import { toolColor } from '../charts/palette'
 import { Ring } from '../charts/Ring'
 import { ShareBar } from '../charts/ShareBar'
 import { useCountUp } from '../charts/useWidth'
+import { usePlayer, usePlayerActions } from '../player/engine'
 import { useAppState } from '../state'
 import { CardHead } from '../ui/CardHead'
 import { ConfirmDelete, sizeOf } from '../ui/ConfirmDelete'
@@ -21,7 +23,7 @@ import { Empty } from '../ui/Empty'
 import { useLayer } from '../ui/useLayer'
 import {
   IconActivity, IconAlert, IconCheck, IconChevron, IconDocuments, IconFail, IconMeetings, IconOk,
-  IconRefresh, IconSearch, IconSpark, IconStop, IconTrash, IconUpload,
+  IconPause, IconPlay, IconRefresh, IconSearch, IconSpark, IconStop, IconTrash, IconUpload,
 } from '../ui/icons'
 import { ago } from '../ui/time'
 import { clock, fileName, usePoll } from '../usePoll'
@@ -75,6 +77,9 @@ interface Poll<T> {
 }
 
 export { call }
+
+interface AudioRef { path: string; id?: string }
+const fetchAudioRef = (a: AudioRef) => (a.id ? fetchStored(a.id) : fetchMedia(a.path))
 
 const IDS = { record: 'meet-record', transcribe: 'meet-transcribe' } as const
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -821,14 +826,15 @@ function MeetingCard({ transcript, selected, onSelect }: {
 
 // ---- meeting detail (one transcript: read, write notes/minutes, build a doc) -----------------------
 
-function MeetingDetail({ transcript, onBack, busy, setBusy, recordings, audioFiles, onTranscribe }: {
+function MeetingDetail({ transcript, onBack, onDelete, busy, setBusy, recordings, audioFiles, onTranscribe }: {
   transcript: Transcript
   onBack: () => void
+  onDelete: () => void
   busy: string
   setBusy: (key: string) => void
   recordings: Poll<Recordings>
   /** Every recording on hand, meet-ai's and uploaded: where a transcript's own audio may be found again. */
-  audioFiles: string[]
+  audioFiles: AudioRef[]
   onTranscribe: (audio: string) => void
 }) {
   const [previews, setPreviews] = useState<Record<string, Preview>>({})
@@ -838,9 +844,15 @@ function MeetingDetail({ transcript, onBack, busy, setBusy, recordings, audioFil
   const [error, setError] = useState('')
   const [reading, setReading] = useState(false)
   const [readingKind, setReadingKind] = useState<Kind | null>(null)
+  const [askingDelete, setAskingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const tools = useAppState().tools
   const timeline = transcript.timeline ?? ''
   const kinds = KINDS.filter((k) => tools.has(k.tool))
+  const { track, playing: audible } = usePlayer()
+  const { open: openTrack, toggle: toggleTrack, close: closeTrack } = usePlayerActions()
+  const [loadingAudio, setLoadingAudio] = useState(false)
 
   const run = async (key: string, work: () => Promise<void>) => {
     setBusy(key)
@@ -874,29 +886,77 @@ function MeetingDetail({ transcript, onBack, busy, setBusy, recordings, audioFil
   const p = previews[timeline]
   const facts = meetingFacts(transcript)
   // The recording this transcript was made from, if it is still here to transcribe again.
-  const ownAudio = audioFiles.find((a) => fileName(a) === transcript.source)
+  const ownAudio = audioFiles.find((a) => fileName(a.path) === transcript.source)
+  const playKey = ownAudio ? (ownAudio.id ?? ownAudio.path) : ''
+  const isPlaying = !!playKey && track?.key === playKey && audible
+  const isCurrent = !!playKey && track?.key === playKey
+
+  const playAudio = async () => {
+    if (!ownAudio) return
+    if (isCurrent) { toggleTrack(); return }
+    setLoadingAudio(true)
+    try {
+      const blob = await fetchAudioRef(ownAudio)
+      openTrack({ key: playKey, title: meetingName(transcript), blob, page: 'meetings' })
+    } catch { setError('Could not load the audio') }
+    finally { setLoadingAudio(false) }
+  }
+
+  const deleteMeeting = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await call('meet_ai__delete_meeting', { transcript: transcript.markdown, delete_audio: true })
+      if (isCurrent) closeTrack()
+      onDelete()
+    } catch (e) {
+      setDeleteError(messageOf(e))
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
-    <div className="panel mt-detail">
+    <>
       <button type="button" className="mt-back ghost" onClick={onBack}>
         <IconChevron size={16} aria-hidden />
-        Meetings
+        All meetings
       </button>
 
-      <div className="card">
-        <CardHead icon={IconDocuments} tool="meet-ai" title={meetingName(transcript)} sub={facts || undefined} />
-
-        <div className="mt-mcard-chips" style={{ marginTop: -4 }}>
-          {transcript.notes && <span className="badge ok"><IconCheck size={12} strokeWidth={2.6} aria-hidden />Notes</span>}
-          {transcript.minutes && <span className="badge ok"><IconCheck size={12} strokeWidth={2.6} aria-hidden />Minutes</span>}
-          {!transcript.notes && !transcript.minutes && transcript.timeline && <span className="badge">Not written up yet</span>}
+      <header className="mt-head">
+        <span className="navtile" style={{ '--tile': toolColor('meet-ai') } as CSSProperties} aria-hidden>
+          <IconMeetings size={20} strokeWidth={2} />
+        </span>
+        <div className="mt-head-text">
+          <h2>{meetingName(transcript)}</h2>
+          {facts && <p className="mt-head-facts muted">{facts}</p>}
+          <div className="mt-mcard-chips">
+            {transcript.notes && <span className="badge ok"><IconCheck size={12} strokeWidth={2.6} aria-hidden />Notes</span>}
+            {transcript.minutes && <span className="badge ok"><IconCheck size={12} strokeWidth={2.6} aria-hidden />Minutes</span>}
+            {!transcript.notes && !transcript.minutes && transcript.timeline && <span className="badge">Not written up yet</span>}
+          </div>
         </div>
+        {tools.has('meet_ai__delete_meeting') && (
+          <button className="ghost mt-delete" onClick={() => { setDeleteError(''); setAskingDelete(true) }}>
+            <IconTrash size={16} aria-hidden />Delete…
+          </button>
+        )}
+      </header>
 
-        {tools.has('meet_ai__read_transcript') && (
+      <div className="card">
+        {(tools.has('meet_ai__read_transcript') || ownAudio) && (
           <div className="row">
-            <button aria-expanded={reading} onClick={() => setReading(!reading)}>
-              {reading ? 'Close transcript' : 'Read transcript'}
-            </button>
+            {ownAudio && (
+              <button disabled={loadingAudio} onClick={() => void playAudio()}>
+                {isPlaying ? <IconPause size={16} aria-hidden /> : <IconPlay size={16} aria-hidden />}
+                {loadingAudio ? 'Loading…' : isPlaying ? 'Pause' : isCurrent ? 'Play' : 'Play recording'}
+              </button>
+            )}
+            {tools.has('meet_ai__read_transcript') && (
+              <button aria-expanded={reading} onClick={() => setReading(!reading)}>
+                {reading ? 'Close transcript' : 'Read transcript'}
+              </button>
+            )}
             {timeline && (
               <button disabled={busy === `preview:${timeline}`} onClick={() => void preview()}>
                 {busy === `preview:${timeline}` ? 'Counting…' : 'Preview'}
@@ -925,7 +985,7 @@ function MeetingDetail({ transcript, onBack, busy, setBusy, recordings, audioFil
               point in notes and minutes is checked against. So they can't be written from it. Its transcript can still be read.
             </p>
             {ownAudio
-              ? <button type="button" onClick={() => onTranscribe(ownAudio)}>Transcribe it again…</button>
+              ? <button type="button" onClick={() => onTranscribe(ownAudio.path)}>Transcribe it again…</button>
               : <p className="small">Transcribing its recording{transcript.source ? `, ${transcript.source},` : ''} again makes one; the recording is not here.</p>}
           </div>
         </div>
@@ -986,30 +1046,189 @@ function MeetingDetail({ transcript, onBack, busy, setBusy, recordings, audioFil
       </p>
 
       {(error || recordings.error) && <Problem>{error || recordings.error}</Problem>}
-    </div>
+
+      {askingDelete && (
+        <ConfirmDelete
+          title={`Delete "${meetingName(transcript)}"?`}
+          facts={[
+            ...(transcript.notes ? [['Notes', 'written'] as [string, string]] : []),
+            ...(transcript.minutes ? [['Minutes', 'written'] as [string, string]] : []),
+          ]}
+          keeps="The transcript, notes, minutes and the recording are all removed permanently."
+          verb="Delete meeting"
+          busy={deleting}
+          error={deleteError}
+          onConfirm={() => void deleteMeeting()}
+          onCancel={() => setAskingDelete(false)}
+        />
+      )}
+    </>
+  )
+}
+
+// ---- audio detail (untranscribed recording: play and transcribe) ----------------------------------
+
+interface PendingAudio { path: string; name: string; id?: string }
+
+function AudioDetail({ audio, onBack, onTranscribe, onDeleted, isTranscribing, audioFiles }: {
+  audio: PendingAudio
+  onBack: () => void
+  onTranscribe: (path: string) => void
+  onDeleted: () => void
+  isTranscribing: boolean
+  audioFiles: AudioRef[]
+}) {
+  const { track, playing: audible } = usePlayer()
+  const { open: openTrack, toggle: toggleTrack, close: closeTrack } = usePlayerActions()
+  const [loadingAudio, setLoadingAudio] = useState(false)
+  const [error, setError] = useState('')
+  const [askingDelete, setAskingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(audio.name)
+  const [renaming, setRenaming] = useState(false)
+
+  const ref = audioFiles.find((a) => a.path === audio.path) ?? { path: audio.path, id: audio.id }
+  const playKey = ref.id ?? ref.path
+  const isPlaying = !!playKey && track?.key === playKey && audible
+  const isCurrent = !!playKey && track?.key === playKey
+
+  const play = async () => {
+    if (isCurrent) { toggleTrack(); return }
+    setLoadingAudio(true)
+    try {
+      const blob = await fetchAudioRef(ref)
+      openTrack({ key: playKey, title: audio.name, blob, page: 'meetings' })
+    } catch { setError('Could not load the audio') }
+    finally { setLoadingAudio(false) }
+  }
+
+  const doDelete = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      if (audio.id) {
+        await deleteUpload(audio.id)
+      } else {
+        await call('meet_ai__delete_audio', { audio: audio.path })
+      }
+      if (isCurrent) closeTrack()
+      onDeleted()
+    } catch (e) {
+      setDeleteError(messageOf(e))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const doRename = async () => {
+    const trimmed = draft.trim()
+    if (!trimmed || trimmed === audio.name) { setEditing(false); return }
+    setRenaming(true)
+    setError('')
+    try {
+      if (audio.id) {
+        await renameUpload(audio.id, trimmed)
+      } else {
+        await call('meet_ai__rename_audio', { audio: audio.path, name: trimmed })
+      }
+      setEditing(false)
+      onDeleted()
+    } catch (e) {
+      setError(messageOf(e))
+    } finally {
+      setRenaming(false)
+    }
+  }
+
+  return (
+    <>
+      <button type="button" className="mt-back ghost" onClick={onBack}>
+        <IconChevron size={16} aria-hidden />
+        All meetings
+      </button>
+
+      <header className="mt-head">
+        <span className="navtile" style={{ '--tile': toolColor('meet-ai') } as CSSProperties} aria-hidden>
+          <IconMeetings size={20} strokeWidth={2} />
+        </span>
+        <div className="mt-head-text">
+          {editing ? (
+            <form className="mt-rename" onSubmit={(e) => { e.preventDefault(); void doRename() }}>
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setEditing(false); setDraft(audio.name) } }}
+              />
+              <button type="submit" className="primary" disabled={renaming || !draft.trim()}>
+                {renaming ? 'Saving…' : 'Save'}
+              </button>
+              <button type="button" className="ghost" disabled={renaming} onClick={() => { setEditing(false); setDraft(audio.name) }}>
+                Cancel
+              </button>
+            </form>
+          ) : (
+            <h2>
+              {audio.name}
+              <button type="button" className="ghost mt-rename-btn" onClick={() => { setDraft(audio.name); setEditing(true) }} aria-label="Rename">
+                Rename
+              </button>
+            </h2>
+          )}
+          <div className="mt-mcard-chips">
+            <span className="badge warn"><IconAlert size={13} aria-hidden />Not transcribed</span>
+          </div>
+        </div>
+        <button className="ghost mt-delete" onClick={() => { setDeleteError(''); setAskingDelete(true) }}>
+          <IconTrash size={16} aria-hidden />Delete…
+        </button>
+      </header>
+
+      <div className="card">
+        <div className="row">
+          <button disabled={loadingAudio} onClick={() => void play()}>
+            {isPlaying ? <IconPause size={16} aria-hidden /> : <IconPlay size={16} aria-hidden />}
+            {loadingAudio ? 'Loading…' : isPlaying ? 'Pause' : isCurrent ? 'Play' : 'Play recording'}
+          </button>
+          <button className="primary" disabled={isTranscribing} onClick={() => onTranscribe(audio.path)}>
+            <IconActivity size={16} aria-hidden />
+            Transcribe…
+          </button>
+        </div>
+      </div>
+
+      {error && <Problem>{error}</Problem>}
+
+      <p className="hint">
+        This recording hasn't been transcribed yet. Play it to check it recorded properly, or transcribe it to get a transcript, notes and minutes.
+      </p>
+
+      {askingDelete && (
+        <ConfirmDelete
+          title={`Delete "${audio.name}"?`}
+          facts={[]}
+          keeps="The recording is removed permanently."
+          verb="Delete recording"
+          busy={deleting}
+          error={deleteError}
+          onConfirm={() => void doDelete()}
+          onCancel={() => setAskingDelete(false)}
+        />
+      )}
+    </>
   )
 }
 
 // ---- the panel -------------------------------------------------------------------------------------
 
 const HAS_BROWSER_MIC = canRecordInBrowser()
-// Where the list and the meeting sit side by side (meetings.css): the one width rule this file needs to know.
-const SIDE_BY_SIDE = '(min-width: 820px)'
-
-function useWide(): boolean {
-  const [wide, setWide] = useState(() => window.matchMedia(SIDE_BY_SIDE).matches)
-  useEffect(() => {
-    const query = window.matchMedia(SIDE_BY_SIDE)
-    const changed = () => setWide(query.matches)
-    query.addEventListener('change', changed)
-    return () => query.removeEventListener('change', changed)
-  }, [])
-  return wide
-}
 
 export function Meetings() {
-  const [view, setView] = useState<'list' | 'new' | 'detail'>('list')
+  const [view, setView] = useState<'list' | 'new' | 'detail' | 'audio'>('list')
   const [selected, setSelected] = useState('')
+  const [selectedAudio, setSelectedAudio] = useState<PendingAudio | null>(null)
   const [audio, setAudio] = useState('')
   const [last, setLast] = useState<Session | null>(null)
   const [busy, setBusy] = useState('')
@@ -1054,16 +1273,16 @@ export function Meetings() {
     void reloadUploads()
   }, [reloadUploads])
 
-  // A meeting is chosen by its transcript or its timeline, whichever the caller has: a transcript from before
-  // timelines has none, and choosing by timeline alone left those two on "Loading…" for ever.
   const selectMeeting = useCallback((key: string) => {
     setSelected(key)
     setView('detail')
+    window.scrollTo({ top: 0 })
   }, [])
 
-  const goNew = useCallback(() => setView('new'), [])
-  const goList = useCallback(() => { setView('list'); setSelected('') }, [])
-  const transcribe = useCallback((path: string) => { setAudio(path); setSelected(''); setView('new') }, [])
+  const goNew = useCallback(() => { setView('new'); window.scrollTo({ top: 0 }) }, [])
+  const goList = useCallback(() => { setView('list'); setSelected(''); setSelectedAudio(null); window.scrollTo({ top: 0 }) }, [])
+  const transcribe = useCallback((path: string) => { setAudio(path); setSelected(''); setSelectedAudio(null); setView('new'); window.scrollTo({ top: 0 }) }, [])
+  const openAudio = useCallback((a: PendingAudio) => { setSelectedAudio(a); setView('audio'); window.scrollTo({ top: 0 }) }, [])
 
   const isSelected = (t: Transcript) => selected !== '' && (t.markdown === selected || t.timeline === selected)
   const selectedTranscript = transcripts.find(isSelected)
@@ -1071,158 +1290,158 @@ export function Meetings() {
   const isOrphaned = session?.state === 'orphaned'
   const isTranscribing = job?.state === 'running'
   const reversed = [...transcripts].sort((a, b) => (b.recorded ?? '').localeCompare(a.recorded ?? ''))
-  // Recordings never transcribed: meet-ai's own, and uploads no transcript was made from (one is named for its audio).
   const stems = new Set(transcripts.map((t) => stemOf(t.markdown)))
-  const pending = [
+  const pending: PendingAudio[] = [
     ...(recordings.data?.untranscribed ?? []).map((a) => ({ path: a.path, name: recordedText(a.recorded) || audioStem(a.path) })),
-    ...(uploads.data?.audio ?? []).filter((a) => !stems.has(audioStem(a.path))).map((a) => ({ path: a.path, name: audioStem(a.name) })),
+    ...(uploads.data?.audio ?? []).filter((a) => !stems.has(audioStem(a.path))).map((a) => ({ path: a.path, name: audioStem(a.name), id: a.id })),
   ]
-  const audioFiles = [...(recordings.data?.audio ?? []), ...(uploads.data?.audio ?? []).map((a) => a.path)]
+  const audioFiles: AudioRef[] = [
+    ...(recordings.data?.audio ?? []).map((path) => ({ path })),
+    ...(uploads.data?.audio ?? []).map((a) => ({ path: a.path, id: a.id })),
+  ]
 
-  // Side by side, the newest meeting opens by itself rather than leaving half the page empty; on a phone the list comes first.
-  const wide = useWide()
-  // Where the list is hidden behind a meeting or the "new" screen, that is a layer over it: Back goes to the list
-  // (useLayer.ts). Side by side there is nothing to go back from, and the newest meeting opens by itself (below).
-  useLayer('meetings', !wide && view !== 'list' ? { view, selected } : null, (to) => {
+  useLayer('meetings', view !== 'list' ? { view, selected } : null, (to) => {
     setView(to?.view ?? 'list')
     setSelected(to?.selected ?? '')
+    if (!to) setSelectedAudio(null)
   })
-  const newest = reversed[0]?.markdown ?? ''
-  useEffect(() => {
-    if (wide && view === 'list' && !selected && newest) selectMeeting(newest)
-  }, [wide, view, selected, newest, selectMeeting])
 
   return (
-    <div className="mt" data-view={view}>
-      {/* ---- sidebar: meeting list ---- */}
-      <div className="mt-sidebar">
-        <div className="mt-list-head">
-          <span className="muted small">{transcripts.length ? `${transcripts.length} meeting${transcripts.length === 1 ? '' : 's'}` : ''}</span>
-          <button type="button" className="primary mt-new-btn" onClick={goNew}>
-            New meeting
+    <div className="panel mt">
+      {view === 'new' ? (
+        <>
+          <button type="button" className="mt-back ghost" onClick={goList}>
+            <IconChevron size={16} aria-hidden />
+            All meetings
           </button>
-        </div>
 
-        {(isRecording || isOrphaned) && (
-          <button type="button" className={`mt-mcard ${isRecording ? 'is-live' : 'is-attention'}`} onClick={goNew}>
-            <strong className="mt-mcard-title">{isRecording ? 'Recording' : 'Interrupted recording'}</strong>
-            <span className="mt-mcard-meta">{isRecording ? clock(elapsed) : `${clock(session?.recorded_seconds)} on disk`}</span>
-            <div className="mt-mcard-chips">
-              <span className={`badge ${isRecording ? '' : 'warn'}`}>
-                {isRecording && <span className="rec-dot" aria-hidden />}
-                {isRecording ? 'Recording' : 'Can recover'}
-              </span>
-            </div>
-          </button>
-        )}
+          {HAS_BROWSER_MIC
+            ? <BrowserRec onRecorded={onBrowserRecorded} />
+            : <Recorder status={recording} elapsed={elapsed} last={last} setLast={setLast} onStopped={stopped} />}
 
-        {isTranscribing && job && (
-          <button type="button" className="mt-mcard is-busy" onClick={goNew}>
-            <strong className="mt-mcard-title">{fileName(job.audio)}</strong>
-            <span className="mt-mcard-meta">
-              Transcribing{job.percent != null ? ` · ${Math.round(job.percent)}%` : ''}
-            </span>
-            <div className="mt-mcard-chips">
-              <span className="badge"><IconActivity size={12} aria-hidden />{job.phase}</span>
-            </div>
-          </button>
-        )}
-
-        {reversed.length > 0 ? (
-          <ul className="mt-meetings" aria-label="Meetings">
-            {reversed.map((t) => (
-              <MeetingCard
-                key={t.markdown}
-                transcript={t}
-                selected={isSelected(t)}
-                onSelect={() => selectMeeting(t.markdown)}
+          {!isRecording && (
+            <>
+              <div className="mt-or"><span>or</span></div>
+              <Transcriber
+                job={job}
+                status={transcription}
+                recordings={recordings}
+                uploads={uploads}
+                audio={audio}
+                setAudio={setAudio}
+                onWriteUp={selectMeeting}
               />
-            ))}
-          </ul>
-        ) : !isRecording && !isOrphaned && !isTranscribing ? (
-          <Empty icon={IconMeetings} title="No meetings yet" action={
-            <button className="primary mt-big" onClick={goNew}>Record your first meeting</button>
-          }>
-            Record a meeting or upload audio. Transcribe it, then generate notes, minutes, and a Google Doc.
-          </Empty>
-        ) : null}
+            </>
+          )}
+        </>
+      ) : view === 'detail' && selectedTranscript ? (
+        <MeetingDetail
+          key={selected}
+          transcript={selectedTranscript}
+          onBack={goList}
+          onDelete={() => { goList(); void reloadRecordings() }}
+          busy={busy}
+          setBusy={setBusy}
+          recordings={recordings}
+          audioFiles={audioFiles}
+          onTranscribe={transcribe}
+        />
+      ) : view === 'detail' && !selectedTranscript ? (
+        <>
+          <button type="button" className="mt-back ghost" onClick={goList}>
+            <IconChevron size={16} aria-hidden />
+            All meetings
+          </button>
+          <div aria-busy="true" style={{ padding: '40px 0' }}>
+            <p className="muted">Loading…</p>
+            <div className="skeleton" style={{ height: 120 }} />
+          </div>
+        </>
+      ) : view === 'audio' && selectedAudio ? (
+        <AudioDetail
+          audio={selectedAudio}
+          onBack={goList}
+          onTranscribe={transcribe}
+          onDeleted={() => { goList(); void reloadRecordings(); void reloadUploads() }}
+          isTranscribing={!!isTranscribing}
+          audioFiles={audioFiles}
+        />
+      ) : (
+        <>
+          {/* ---- list header ---- */}
+          <div className="mt-list-head">
+            <span className="muted small">{transcripts.length ? `${transcripts.length} meeting${transcripts.length === 1 ? '' : 's'}` : ''}</span>
+            <button type="button" className="primary mt-new-btn" onClick={goNew}>
+              New meeting
+            </button>
+          </div>
 
-        {pending.length > 0 && (
-          <section className="mt-pending" aria-label="Recordings not transcribed yet">
-            <h2 className="mt-label">Not transcribed yet</h2>
-            <ul className="mt-meetings">
-              {pending.map((a) => (
-                <li key={a.path} className="mt-mcard is-pending">
-                  <span className="mt-pending-text">
-                    <strong className="mt-mcard-title">{a.name}</strong>
-                    <span className="mt-mcard-meta">{fileName(a.path)}</span>
-                  </span>
-                  <button type="button" disabled={isTranscribing} onClick={() => transcribe(a.path)} aria-label={`Transcribe ${a.name}`}>Transcribe…</button>
-                </li>
+          {/* ---- live banners ---- */}
+          {(isRecording || isOrphaned) && (
+            <button type="button" className={`mt-mcard ${isRecording ? 'is-live' : 'is-attention'}`} onClick={goNew}>
+              <strong className="mt-mcard-title">{isRecording ? 'Recording' : 'Interrupted recording'}</strong>
+              <span className="mt-mcard-meta">{isRecording ? clock(elapsed) : `${clock(session?.recorded_seconds)} on disk`}</span>
+              <div className="mt-mcard-chips">
+                <span className={`badge ${isRecording ? '' : 'warn'}`}>
+                  {isRecording && <span className="rec-dot" aria-hidden />}
+                  {isRecording ? 'Recording' : 'Can recover'}
+                </span>
+              </div>
+            </button>
+          )}
+
+          {isTranscribing && job && (
+            <button type="button" className="mt-mcard is-busy" onClick={goNew}>
+              <strong className="mt-mcard-title">{fileName(job.audio)}</strong>
+              <span className="mt-mcard-meta">
+                Transcribing{job.percent != null ? ` · ${Math.round(job.percent)}%` : ''}
+              </span>
+              <div className="mt-mcard-chips">
+                <span className="badge"><IconActivity size={12} aria-hidden />{job.phase}</span>
+              </div>
+            </button>
+          )}
+
+          {/* ---- meeting list ---- */}
+          {reversed.length > 0 ? (
+            <ul className="mt-meetings" aria-label="Meetings">
+              {reversed.map((t) => (
+                <MeetingCard
+                  key={t.markdown}
+                  transcript={t}
+                  selected={isSelected(t)}
+                  onSelect={() => selectMeeting(t.markdown)}
+                />
               ))}
             </ul>
-          </section>
-        )}
-      </div>
-
-      {/* ---- main: detail or new meeting ---- */}
-      <div className="mt-main">
-        {view === 'new' ? (
-          <div className="panel mt-new-flow">
-            <button type="button" className="mt-back ghost" onClick={goList}>
-              <IconChevron size={16} aria-hidden />
-              Meetings
-            </button>
-
-            {HAS_BROWSER_MIC
-              ? <BrowserRec onRecorded={onBrowserRecorded} />
-              : <Recorder status={recording} elapsed={elapsed} last={last} setLast={setLast} onStopped={stopped} />}
-
-            {!isRecording && (
-              <>
-                <div className="mt-or"><span>or</span></div>
-                <Transcriber
-                  job={job}
-                  status={transcription}
-                  recordings={recordings}
-                  uploads={uploads}
-                  audio={audio}
-                  setAudio={setAudio}
-                  onWriteUp={selectMeeting}
-                />
-              </>
-            )}
-          </div>
-        ) : view === 'detail' && selectedTranscript ? (
-          <MeetingDetail
-            key={selected}
-            transcript={selectedTranscript}
-            onBack={goList}
-            busy={busy}
-            setBusy={setBusy}
-            recordings={recordings}
-            audioFiles={audioFiles}
-            onTranscribe={transcribe}
-          />
-        ) : view === 'detail' && !selectedTranscript ? (
-          <div className="panel mt-detail">
-            <button type="button" className="mt-back ghost" onClick={goList}>
-              <IconChevron size={16} aria-hidden />
-              Meetings
-            </button>
-            <div className="mt-empty-main" aria-busy="true">
-              <p className="muted">Loading…</p>
-              <div className="skeleton" style={{ height: 120 }} />
-            </div>
-          </div>
-        ) : (
-          <div className="mt-empty-main">
-            <Empty icon={IconMeetings} title="Select a meeting">
-              Choose one from the list, or start a new one.
+          ) : !isRecording && !isOrphaned && !isTranscribing ? (
+            <Empty icon={IconMeetings} title="No meetings yet" action={
+              <button className="primary mt-big" onClick={goNew}>Record your first meeting</button>
+            }>
+              Record a meeting or upload audio. Transcribe it, then generate notes, minutes, and a Google Doc.
             </Empty>
-          </div>
-        )}
-      </div>
+          ) : null}
+
+          {pending.length > 0 && (
+            <section className="mt-pending" aria-label="Recordings not transcribed yet">
+              <h2 className="mt-label">Not transcribed yet</h2>
+              <ul className="mt-meetings">
+                {pending.map((a) => (
+                  <li key={a.path}>
+                    <button type="button" className="mt-mcard is-pending" onClick={() => openAudio(a)}>
+                      <strong className="mt-mcard-title">{a.name}</strong>
+                      <span className="mt-mcard-meta">{fileName(a.path)}</span>
+                      <div className="mt-mcard-chips">
+                        <span className="badge warn"><IconAlert size={13} aria-hidden />Not transcribed</span>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
+      )}
     </div>
   )
 }

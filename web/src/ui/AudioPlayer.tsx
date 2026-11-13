@@ -170,6 +170,11 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
         </div>
       )}
 
+      <div className="player-id">
+        {track.album && <span key={`al-${track.key}`} className="player-id-book">{track.album}</span>}
+        <span key={`ti-${track.key}`} className="player-id-title">{track.title}</span>
+      </div>
+
       {failed ? (
         <p className="player-failed" role="alert">This browser cannot play this file. Download it to listen.</p>
       ) : (
@@ -221,14 +226,6 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
           </div>
 
           <div className="player-controls" data-steps={steps || undefined}>
-            <div className="pc-side">
-              <Menu label="Playback speed" value={<>{rate}×</>}>
-                {(close) => RATES.map((r) => (
-                  <button key={r} role="menuitemradio" aria-checked={rate === r} onClick={() => { act.setRate(r); close() }}>{r}×</button>
-                ))}
-              </Menu>
-            </div>
-
             <div className="pc-main">
               {steps && (
                 <button
@@ -265,21 +262,11 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
                 </button>
               )}
             </div>
-
-            <div className="pc-side pc-right">
-              <Menu
-                align="right"
-                label={sleep ? `Sleep timer: ${Math.ceil(sleepLeft / 60)} minutes left` : 'Sleep timer'}
-                value={<><IconMoon size={15} aria-hidden />{sleep && <span>{clock(sleepLeft)}</span>}</>}
-              >
-                {(close) => (
-                  <>
-                    <button role="menuitemradio" aria-checked={sleep === null} onClick={() => { act.setSleep(null); close() }}>Off</button>
-                    {SLEEPS.map((m) => (
-                      <button key={m} role="menuitemradio" aria-checked={sleep?.minutes === m} onClick={() => { act.setSleep(m); close() }}>{m} minutes</button>
-                    ))}
-                  </>
-                )}
+            <div className="pc-aux">
+              <Menu label="Playback speed" value={<>{rate}×</>}>
+                {(close) => RATES.map((r) => (
+                  <button key={r} role="menuitemradio" aria-checked={rate === r} onClick={() => { act.setRate(r); close() }}>{r}×</button>
+                ))}
               </Menu>
               <span className="pc-volume">
                 <button className="ghost icon" aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'} onClick={() => act.setMuted(!muted)}>
@@ -297,6 +284,20 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
                   onChange={(e) => act.setVolume(Number(e.target.value))}
                 />
               </span>
+              <Menu
+                align="right"
+                label={sleep ? `Sleep timer: ${Math.ceil(sleepLeft / 60)} minutes left` : 'Sleep timer'}
+                value={<><IconMoon size={15} aria-hidden />{sleep && <span>{clock(sleepLeft)}</span>}</>}
+              >
+                {(close) => (
+                  <>
+                    <button role="menuitemradio" aria-checked={sleep === null} onClick={() => { act.setSleep(null); close() }}>Off</button>
+                    {SLEEPS.map((m) => (
+                      <button key={m} role="menuitemradio" aria-checked={sleep?.minutes === m} onClick={() => { act.setSleep(m); close() }}>{m} minutes</button>
+                    ))}
+                  </>
+                )}
+              </Menu>
             </div>
           </div>
         </>

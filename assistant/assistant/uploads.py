@@ -269,6 +269,35 @@ async def delete_upload(index: FileIndex, root: Path, file_id: str) -> dict[str,
     return {"id": record.id, "kind": record.kind, "name": record.name, "files": 1, "bytes": size}
 
 
+async def rename_upload(index: FileIndex, root: Path, file_id: str, new_name: str) -> dict[str, Any]:
+    """Rename one upload, by its id. The file on disk is renamed and the record is updated."""
+    record = await index.get(file_id) if files.is_id(file_id) else None
+    if record is None:
+        raise UploadError("no such upload")
+    if record.kind == "docs":
+        raise UploadError("markdown uploads cannot be renamed here")
+
+    clean = _clean_component(new_name)
+    ext = Path(record.name).suffix
+    # Force the original extension if the caller supplied a different one or none
+    exts = EXTENSIONS.get(record.kind, set())
+    if Path(clean).suffix.lower() not in exts:
+        clean = Path(clean).stem + ext
+
+    slot = root / record.id
+    old_path = _inside(root, slot / _clean_component(record.name))
+    new_path = _inside(root, slot / clean)
+    if not old_path.is_file() or old_path.is_symlink():
+        raise UploadError(f"no such upload: {record.name}")
+    if old_path != new_path:
+        if new_path.exists():
+            raise UploadError(f"a file named {clean} already exists")
+        old_path.rename(new_path)
+    await index.rename(record.id, clean)
+    return {"id": record.id, "kind": record.kind, "old_name": record.name, "new_name": clean,
+            "path": str(new_path)}
+
+
 # ---------------------------------------------------------------------------
 # The one-time move of the old uploads folder into the store
 # ---------------------------------------------------------------------------

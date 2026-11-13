@@ -95,7 +95,8 @@ RUN meet-ai/fetch-models.sh
 RUN mkdir -p /data \
  && for d in voices voice output .cache; do ln -s "/data/audiobook/${d#.}" "/app/audiobook/$d"; done \
  && ln -s /data/audiobook/.env /app/audiobook/.env \
- && chown -R shelby:shelby /data /app/meet-ai/models
+ && mkdir -p /app/meet-ai/.cache \
+ && chown -R shelby:shelby /data /app/meet-ai/models /app/meet-ai/.cache
 
 ENV HOME=/home/shelby \
     PYTHONUNBUFFERED=1 \

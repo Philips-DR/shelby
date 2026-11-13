@@ -5,20 +5,29 @@ import re
 # Keep chunks short enough for steady progress and cheap re-renders, but never split a sentence.
 MAX_CHUNK_CHARS = 400
 
-SENTENCE_END = re.compile(r"(?<=[.!?…])[\"'”’)\]]*\s+(?=[\"'“‘(\[]?[A-Z0-9])")
+# A sentence ends at . ! ? or …, together with any closing quote or bracket that belongs to it, when a capital or a
+# digit (after an opening quote or bracket, if any) starts the next one. The closers stay with the sentence they close:
+# when the split used them up, a closing quote or bracket after a full stop was lost before the voice ever heard it
+# (843 of 6,232 real paragraphs, 2026-11-13).
+CLOSING = "\"'”’)]"
+SENTENCE_END = re.compile(rf"[.!?…][{re.escape(CLOSING)}]*(?=\s+[\"'“‘(\[]?[A-Z0-9])")
 ABBREVIATIONS = ("Mr.", "Mrs.", "Ms.", "Dr.", "St.", "Prof.", "Sr.", "Jr.", "vs.", "etc.", "e.g.", "i.e.", "No.")
 
 
 def split_sentences(paragraph: str) -> list[str]:
-    parts = SENTENCE_END.split(paragraph)
     sentences: list[str] = []
-    for part in parts:
-        # Re-join splits that happened after an abbreviation such as "Mr."
-        if sentences and sentences[-1].endswith(ABBREVIATIONS):
+    start = 0
+    for end in [m.end() for m in SENTENCE_END.finditer(paragraph)] + [len(paragraph)]:
+        part = paragraph[start:end].strip()
+        start = end
+        if not part:
+            continue
+        # Re-join splits that happened after an abbreviation such as "Mr." (or "Dr.)")
+        if sentences and sentences[-1].rstrip(CLOSING).endswith(ABBREVIATIONS):
             sentences[-1] += " " + part
         else:
             sentences.append(part)
-    return [s.strip() for s in sentences if s.strip()]
+    return sentences
 
 
 def chunk_paragraph(paragraph: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:

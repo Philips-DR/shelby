@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Shelby Meeting Capture",
+  "version": "0.1.0",
+  "description": "Capture meeting audio from a browser tab and send it to Shelby for transcription",
+  "permissions": ["tabCapture", "offscreen", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Shelby Meeting Capture"
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "minimum_chrome_version": "116"
+}

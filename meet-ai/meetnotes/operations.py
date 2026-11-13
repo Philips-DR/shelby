@@ -171,6 +171,89 @@ def list_recordings(audio_dir: Path, transcript_dir: Path) -> Recordings:
     return Recordings(audio=audio, transcripts=transcripts, untranscribed=untranscribed)
 
 
+def delete_meeting(transcript_path: Path, audio_dir: Path | None = None,
+                    delete_audio: bool = False) -> dict:
+    """Remove a meeting's transcript and everything written from it.
+
+    Returns what was deleted and what was kept, so a caller can confirm.
+    """
+    md = transcript_path.resolve()
+    if not md.is_file():
+        raise OperationError(f"no transcript at {transcript_path}")
+
+    header = transcript_header(md)
+    stem = md.with_suffix("")
+    siblings = [
+        stem.with_suffix(".timeline.json"),
+        stem.with_suffix(".notes.md"),
+        stem.with_suffix(".notes.json"),
+        stem.with_suffix(".minutes.md"),
+        stem.with_suffix(".minutes.json"),
+    ]
+    deleted = []
+    for f in [md] + siblings:
+        if f.is_file():
+            f.unlink()
+            deleted.append(f.name)
+
+    audio_deleted = None
+    if delete_audio and audio_dir:
+        source = header.get("source") or md.stem
+        for ext in (".flac", ".webm", ".m4a", ".mp3", ".wav", ".ogg", ".opus", ".mp4"):
+            candidate = audio_dir / (Path(source).stem + ext)
+            if candidate.is_file():
+                candidate.unlink()
+                audio_deleted = candidate.name
+                break
+
+    return {"deleted": deleted, "audio_deleted": audio_deleted}
+
+
+# ---------------------------------------------------------------------------
+# Audio management (untranscribed recordings)
+# ---------------------------------------------------------------------------
+
+def _safe_audio(audio_path: Path, audio_dir: Path) -> Path:
+    """Resolve *audio_path* and verify it is a plain file inside *audio_dir*."""
+    resolved = audio_path.resolve()
+    try:
+        resolved.relative_to(audio_dir.resolve())
+    except ValueError:
+        raise OperationError(f"not inside the audio folder: {audio_path}")
+    if not resolved.is_file() or resolved.is_symlink():
+        raise OperationError(f"no audio file at {audio_path}")
+    if ".recording" in resolved.parts:
+        raise OperationError("cannot touch a recording in progress")
+    return resolved
+
+
+def delete_audio(audio_path: Path, audio_dir: Path) -> dict:
+    """Remove a single audio file from the audio folder."""
+    resolved = _safe_audio(audio_path, audio_dir)
+    name = resolved.name
+    resolved.unlink()
+    return {"deleted": name, "path": str(audio_path)}
+
+
+def rename_audio(audio_path: Path, new_name: str, audio_dir: Path) -> dict:
+    """Rename an audio file, keeping it in the same folder and preserving its extension."""
+    from transcribe import AUDIO_EXTS
+
+    resolved = _safe_audio(audio_path, audio_dir)
+    ext = resolved.suffix
+    stem = new_name.strip()
+    if not stem:
+        raise OperationError("new name is empty")
+    # Strip the extension if the caller included one, then force the original
+    if Path(stem).suffix.lower() in AUDIO_EXTS:
+        stem = Path(stem).stem
+    target = resolved.with_name(stem + ext)
+    if target.exists():
+        raise OperationError(f"a file named {target.name} already exists")
+    resolved.rename(target)
+    return {"old": resolved.name, "new": target.name, "path": str(target)}
+
+
 # ---------------------------------------------------------------------------
 # Notes
 # ---------------------------------------------------------------------------

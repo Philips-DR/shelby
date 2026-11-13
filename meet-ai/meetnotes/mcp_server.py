@@ -25,6 +25,8 @@ from meetnotes.operations import (
     MAX_SYNC_AUDIO_SECONDS,
     OperationError,
     as_dict,
+    delete_audio,
+    delete_meeting,
     generate_minutes,
     generate_notes,
     list_audio_sources,
@@ -34,6 +36,7 @@ from meetnotes.operations import (
     read_transcript,
     read_written,
     recording_status,
+    rename_audio,
     start_recording,
     start_transcription,
     stop_recording,
@@ -398,6 +401,59 @@ def create_meet_ai_server(paths: ServerPaths, config: ModelConfig, dictation: Di
         try:
             return {"job": transcription_status(paths.transcript_dir, job_id)}
         except OperationError as error:
+            return _failed(error)
+
+    @server.tool(
+        name="delete_meeting",
+        title="Delete a meeting's transcript and write-ups",
+        description=(
+            "Remove the transcript markdown, timeline, notes and minutes for a meeting. "
+            "Pass delete_audio=true to also remove the source recording. Returns the list "
+            "of files that were deleted."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False, destructive_hint=True, open_world_hint=False,
+        ),
+    )
+    def _delete_meeting(transcript: str, delete_audio: bool = False) -> dict:
+        try:
+            return delete_meeting(
+                Path(transcript),
+                audio_dir=paths.audio_dir if delete_audio else None,
+                delete_audio=delete_audio,
+            )
+        except (OperationError, OSError) as error:
+            return _failed(error)
+
+    @server.tool(
+        name="delete_audio",
+        title="Delete an audio recording",
+        description="Remove a single audio file from the recordings folder.",
+        annotations=ToolAnnotations(
+            read_only_hint=False, destructive_hint=True, open_world_hint=False,
+        ),
+    )
+    def _delete_audio(audio: str) -> dict:
+        try:
+            return delete_audio(Path(audio), audio_dir=paths.audio_dir)
+        except (OperationError, OSError) as error:
+            return _failed(error)
+
+    @server.tool(
+        name="rename_audio",
+        title="Rename an audio recording",
+        description=(
+            "Rename an audio file in the recordings folder. "
+            "Pass the new name without the extension; the original extension is kept."
+        ),
+        annotations=ToolAnnotations(
+            read_only_hint=False, destructive_hint=False, open_world_hint=False,
+        ),
+    )
+    def _rename_audio(audio: str, name: str) -> dict:
+        try:
+            return rename_audio(Path(audio), name, audio_dir=paths.audio_dir)
+        except (OperationError, OSError) as error:
             return _failed(error)
 
     return server

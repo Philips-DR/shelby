@@ -128,7 +128,7 @@ export function App() {
           <Suspense fallback={<Loading />}><Page section={section} go={go} /></Suspense>
         </main>
       </div>
-      <MiniPlayer goToBooks={() => go('audiobooks')} />
+      <MiniPlayer go={go} />
       <TabBar section={section} go={go} openMore={() => setOverlay('more')} />
       <MoreSheet open={more} onClose={closeOverlay} section={section} go={go} theme={theme} setTheme={setTheme} onSearch={openPalette} />
       <CommandPalette open={palette} onClose={closeOverlay} go={go} setTheme={setTheme} pending={pending.length} />

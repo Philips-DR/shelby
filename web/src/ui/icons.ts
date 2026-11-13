@@ -61,4 +61,8 @@ export {
   PanelLeftClose as IconPanelClose,
   SquarePen as IconNewChat,
   Pencil as IconRename,
+  AudioLines as IconFollow,
+  ArrowDown as IconDown,
+  BookOpen as IconPage,
+  ListOrdered as IconList,
 } from 'lucide-react'

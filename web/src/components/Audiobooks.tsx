@@ -10,7 +10,7 @@
 // page is drawn from what the tool returned; nothing is estimated here except the selection's
 // speech and render time, which is the tool's own per-chapter figures added up (and says so).
 
-import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import {
   AUDIO_EXTS, deleteKept, deleteUpload, fetchMedia, fetchStored, getKept, getUploads, isAudio, uploadBook, uploadVoice,
   type Kept, type Uploads,
@@ -22,18 +22,21 @@ import { Ring } from '../charts/Ring'
 import { useCountUp } from '../charts/useWidth'
 import { ask, call } from '../call'
 import { CardHead } from '../ui/CardHead'
-import { usePlayer, usePlayerActions, type Track } from '../player/engine'
+import { usePlayer, usePlayerActions, usePlayerClock, type Track } from '../player/engine'
 import { onRequest, takeRequest } from '../player/showing'
 import { adjacent } from '../player/queue'
 import { renderLabel, unrendered } from './audiobookText'
 import { audioKey, goesWithBook, withKept, withKeptBooks, withKeptSamples, type AudioEntry } from './audiobookKept'
+import { activeSegment, fetchTiming, spokenSegments, type SegmentTiming } from './audiobookTiming'
+import { unitAt, unitsFor, wordsOf } from './audiobookSentences'
 import { AudioPlayer } from '../ui/AudioPlayer'
+import { AudioFollow, type FollowChapter } from './AudioFollow'
 import { useLayer } from '../ui/useLayer'
 import { useAppState } from '../state'
 import { ConfirmDelete, sizeOf } from '../ui/ConfirmDelete'
 import { DropZone } from '../ui/DropZone'
 import {
-  IconAlert, IconAudiobooks, IconBack, IconCheck, IconChevron, IconClose, IconDocuments, IconDownload, IconFail, IconMeetings,
+  IconAlert, IconAudiobooks, IconBack, IconCheck, IconChevron, IconClose, IconDocuments, IconDownload, IconFail, IconFollow, IconMeetings,
   IconOk, IconPlay, IconRefresh, IconSpark, IconStop, IconTrash, IconUpload, IconZap,
 } from '../ui/icons'
 import { Empty } from '../ui/Empty'
@@ -717,10 +720,33 @@ function Corrections({ pdf, onSaved }: { pdf: string; onSaved: () => void }) {
   )
 }
 
-function Reader({ pdf, chapter, onClose }: { pdf: string; chapter: Chapter; onClose: () => void }) {
+/** The chapter's timing: `undefined` while it is being fetched, `null` once it is known there is none. */
+function useTiming(audio: AudioEntry | undefined, kept: Kept[]): SegmentTiming[] | null | undefined {
+  const [timing, setTiming] = useState<SegmentTiming[] | null | undefined>(undefined)
+  const key = audio ? audioKey(audio) : ''
+  useEffect(() => {
+    if (!audio) { setTiming(null); return }
+    setTiming(undefined)
+    let live = true
+    void fetchTiming(audio, kept).then(
+      (t) => { if (live) setTiming(t) },
+      () => { if (live) setTiming(null) },
+    )
+    return () => { live = false }
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  return timing
+}
+
+function Reader({ pdf, chapter, timing, playing, onClose }: {
+  pdf: string; chapter: Chapter; timing: SegmentTiming[] | null; playing: boolean; onClose: () => void
+}) {
   const [text, setText] = useState<ChapterText | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const { time } = usePlayerClock()
+  const { seek } = usePlayerActions()
+  const activeRef = useRef<HTMLSpanElement | null>(null)
+  const scrollTimer = useRef(0)
 
   const load = async (start: number) => {
     setBusy(true)
@@ -737,18 +763,91 @@ function Reader({ pdf, chapter, onClose }: { pdf: string; chapter: Chapter; onCl
 
   useEffect(() => { void load(0) }, [pdf, chapter.number])
 
+  // Timing entries split: announcements first, then segments matching text.segments by index.
+  const segTiming = useMemo(() => (timing ? spokenSegments(timing) : null), [timing])
+
+  // Each paragraph cut where it was spoken: by sentence, else by chunk, else not at all (null).
+  const cuts = useMemo(
+    () => (text && segTiming ? text.segments.map((s, i) => (segTiming[i] ? unitsFor(wordsOf(s.text), segTiming[i]!.chunks) : null)) : null),
+    [text, segTiming],
+  )
+  const synced = playing && !!segTiming
+  const activeSeg = synced ? activeSegment(segTiming!, time) : -1
+  const activeUnit = synced && activeSeg >= 0 && cuts?.[activeSeg] ? unitAt(cuts[activeSeg]!, time) : -1
+
+  // Auto-scroll the sentence being read into view, throttled so it does not fight the user.
+  useEffect(() => {
+    if (!synced || !activeRef.current) return
+    window.clearTimeout(scrollTimer.current)
+    const el = activeRef.current
+    scrollTimer.current = window.setTimeout(() => {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 120)
+  }, [synced, activeSeg, activeUnit])
+
+  const seekTo = useCallback((seconds: number) => { if (playing) seek(seconds) }, [playing, seek])
+
   return (
-    <div className="card ab-reader">
+    <div className={`card ab-reader ${synced ? 'ab-synced' : ''}`}>
       <CardHead icon={IconDocuments} tool="audiobook" title={`What will be read — ${chapter.label}`} sub={`The exact text the narrator will speak · ${chapter.words.toLocaleString()} words`}>
         <button className="ghost" onClick={onClose}><IconClose size={16} aria-hidden />Hide</button>
       </CardHead>
       <div className="reader">
         {text && (
           <div className="reader-text">
-            <p className="muted small">Announced as: “{text.announce}”</p>
-            {text.segments.map((s, i) => s.kind === 'heading' || s.kind === 'title'
-              ? <p key={i}><strong>{s.text}</strong></p>
-              : <p key={i}>{s.kind === 'list_item' ? '• ' : ''}{s.text}</p>)}
+            <p className="muted small">Announced as: &ldquo;{text.announce}&rdquo;</p>
+            {text.segments.map((s, i) => {
+              const st = segTiming?.[i]
+              const isHead = s.kind === 'heading' || s.kind === 'title'
+              const isSeg = synced && activeSeg === i
+              const units = cuts?.[i]
+              // Cut where it was spoken: each sentence (or chunk) is a clickable, highlightable span.
+              if (synced && st && units) {
+                const words = wordsOf(s.text)
+                const spans = units.map((u, ui) => {
+                  const on = isSeg && activeUnit === ui
+                  return (
+                    <span
+                      key={ui}
+                      ref={on ? activeRef : undefined}
+                      className={`ab-chunk ${on ? 'ab-chunk-on' : ''}`}
+                      onClick={() => seekTo(u.start)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seekTo(u.start) } }}
+                    >
+                      {words.slice(u.first, u.last).join(' ')}{ui < units.length - 1 ? ' ' : ''}
+                    </span>
+                  )
+                })
+                return (
+                  <p key={i} className={`ab-timed ${isSeg ? 'ab-seg-on' : ''}`}>
+                    {s.kind === 'list_item' && '• '}
+                    {isHead ? <strong>{spans}</strong> : spans}
+                  </p>
+                )
+              }
+              // Whole-paragraph highlighting: its words could not be shared out among the timed chunks.
+              if (synced && st) {
+                return (
+                  <p
+                    key={i}
+                    ref={isSeg ? (activeRef as React.Ref<HTMLParagraphElement>) : undefined}
+                    className={`ab-timed ${isSeg ? 'ab-seg-on' : ''}`}
+                    onClick={() => seekTo(st.start)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seekTo(st.start) } }}
+                  >
+                    {isHead ? <strong>{s.text}</strong> : <>{s.kind === 'list_item' ? '• ' : ''}{s.text}</>}
+                  </p>
+                )
+              }
+              // No timing: plain text, as before.
+              return isHead
+                ? <p key={i}><strong>{s.text}</strong></p>
+                : <p key={i}>{s.kind === 'list_item' ? '• ' : ''}{s.text}</p>
+            })}
           </div>
         )}
         {text?.truncated && (
@@ -768,7 +867,7 @@ function Reader({ pdf, chapter, onClose }: { pdf: string; chapter: Chapter; onCl
 
 /** One chapter: tick it to render it, play it once it is rendered, read what will be spoken. Its text and its
  *  player open under it: below the whole list, a phone showed nothing where the button was pressed. */
-function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, reading, onToggle, onRead }: {
+function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, reading, following, onFollow, onPlayChapter, onDeleteAudio, onRenderChapter, kept, onToggle, onRead }: {
   pdf: string
   /** Bumped when corrections are saved, so open text is read again with them applied. */
   version: number
@@ -779,6 +878,12 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
   longest: number
   book: string
   reading: boolean
+  following: boolean
+  onFollow: (on: boolean) => void
+  onPlayChapter?: (chapter: number) => void
+  onDeleteAudio?: (chapter: number) => void
+  onRenderChapter?: (chapter: number) => void
+  kept: Kept[]
   onToggle: () => void
   onRead: () => void
 }) {
@@ -786,6 +891,8 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
   const audio = chapter.audio?.[0]
   const { current, playing, busy, error, play, close } = usePlay(audio, `${chapter.label} · ${book}`,
     (blob) => chapterTrack(pdf, chapters, chapter, book, blob))
+  const timing = useTiming(audio, kept)
+  const followable = !!timing && spokenSegments(timing).length > 0
   const width = longest > 0 ? Math.max(2, (chapter.words / longest) * 100) : 0
   return (
     <li id={`ab-ch-${chapter.number}`} className={`ab-ch ${chosen ? '' : 'off'} ${current ? 'loaded' : ''}`}>
@@ -814,8 +921,17 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
         </span>
       </div>
       {current && <AudioPlayer onClose={close} />}
+      {current && followable && (
+        <div className="ab-follow-row">
+          <button onClick={() => onFollow(true)}><IconFollow size={16} aria-hidden />Follow along</button>
+        </div>
+      )}
+      {current && timing === null && (
+        <p className="small muted ab-follow-note">This recording has no word timing. Render the chapter again to follow along.</p>
+      )}
+      {following && timing && <AudioFollow pdf={pdf} chapter={{ number: chapter.number, label: chapter.label }} chapters={chapters as readonly FollowChapter[]} book={book} timing={timing} onClose={() => onFollow(false)} onPlayChapter={onPlayChapter} onDeleteAudio={onDeleteAudio} onRenderChapter={onRenderChapter} />}
       {error && <p className="error">{error}</p>}
-      {reading && <Reader key={`${pdf}:${chapter.number}:${version}`} pdf={pdf} chapter={chapter} onClose={onRead} />}
+      {reading && <Reader key={`${pdf}:${chapter.number}:${version}`} pdf={pdf} chapter={chapter} timing={timing ?? null} playing={current && playing} onClose={onRead} />}
     </li>
   )
 }
@@ -843,6 +959,9 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
   const overview = usePoll(() => call<Overview>('audiobook__preview_book', { pdf }), 3_600_000)
   const [picked, setPicked] = useState<Set<number> | null>(null)
   const [reading, setReading] = useState<number | null>(null)
+  // The chapter shown full-screen with its words lit as they are said. A layer: Back closes it (useLayer.ts).
+  const [following, setFollowing] = useState<number | null>(null)
+  useLayer('ab-follow', following, setFollowing)
   // Bumped when corrections are saved, so the open chapter's text is read again with them applied.
   const [version, setVersion] = useState(0)
   const [voice, setVoice] = useState('')
@@ -945,6 +1064,33 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
   const title = data?.title ?? fileName(pdf)
   const readingThis = running && job?.kind === 'analyse' && job.target === mine
 
+  const act = usePlayerActions()
+  const playAndFollow = useCallback(async (num: number) => {
+    const ch = chapters.find(c => c.number === num)
+    if (!ch?.audio?.[0]) return
+    const blob = await fetchAudio(ch.audio[0])
+    const track = chapterTrack(data?.pdf ?? pdf, chapters, ch, title, blob)
+    act.open(track)
+    setFollowing(num)
+  }, [chapters, data?.pdf, pdf, title, act])
+
+  const deleteChapterAudio = useCallback(async (num: number) => {
+    const ch = chapters.find(c => c.number === num)
+    if (!ch?.audio?.length) return
+    const ids = ch.audio.filter(a => a.id).map(a => a.id!)
+    if (ids.length > 0) {
+      try { await deleteKept(ids) } catch { /* kept may already be gone */ }
+    }
+    await overview.reload()
+  }, [chapters, overview])
+
+  const renderChapter = useCallback(async (num: number) => {
+    await start('audiobook__start_render', {
+      pdf, voice: voiceName, speed, m4b: false,
+      chapters: String(num),
+    })
+  }, [pdf, voiceName, speed])
+
   const heading = (
     <header className="ab-bookhead">
       <span className="navtile" style={style({ '--tile': toolColor('audiobook') })}><IconAudiobooks size={20} strokeWidth={2} aria-hidden /></span>
@@ -1035,6 +1181,12 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
                     longest={longest}
                     book={title}
                     reading={reading === c.number}
+                    following={following === c.number}
+                    onFollow={(on) => setFollowing(on ? c.number : null)}
+                    onPlayChapter={playAndFollow}
+                    onDeleteAudio={deleteChapterAudio}
+                    onRenderChapter={renderChapter}
+                    kept={kept}
                     onToggle={() => toggle(c.number)}
                     onRead={() => setReading(reading === c.number ? null : c.number)}
                   />

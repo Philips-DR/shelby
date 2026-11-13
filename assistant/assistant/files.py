@@ -121,6 +121,10 @@ class FileIndex(ABC):
         """Every markdown record's file names, in order, by id: what a listing shows without the texts."""
 
     @abstractmethod
+    async def rename(self, file_id: str, new_name: str) -> None:
+        """Change a file's recorded name."""
+
+    @abstractmethod
     async def remove(self, file_id: str) -> None:
         """Forget a file, and its texts with it."""
 
@@ -170,6 +174,17 @@ class JsonFileIndex(FileIndex):
 
     async def text_names(self) -> dict[str, list[str]]:
         return {file_id: sorted(texts) for file_id, texts in self._load()[1].items()}
+
+    async def rename(self, file_id: str, new_name: str) -> None:
+        records, texts = self._load()
+        updated = []
+        for r in records:
+            if r.id == file_id:
+                updated.append(StoredFile(id=r.id, kind=r.kind, name=new_name, bytes=r.bytes,
+                                          sha256=r.sha256, made_by=r.made_by, created=r.created))
+            else:
+                updated.append(r)
+        self._save(updated, texts)
 
     async def remove(self, file_id: str) -> None:
         records, texts = self._load()
@@ -222,6 +237,9 @@ class PgFileIndex(FileIndex):
         for row in await self.database.pool.fetch("SELECT file_id, name FROM file_texts"):
             names.setdefault(row["file_id"], []).append(row["name"])
         return {file_id: sorted(found) for file_id, found in names.items()}
+
+    async def rename(self, file_id: str, new_name: str) -> None:
+        await self.database.pool.execute("UPDATE files SET name = $2 WHERE id = $1", file_id, new_name)
 
     async def remove(self, file_id: str) -> None:
         # Its texts go with it (ON DELETE CASCADE).

@@ -14,8 +14,10 @@ from audiobook.render import (
     SENTENCE_PAUSE,
     TITLE_PAUSE,
     ChunkRenderer,
+    _timing_for_speed,
     announcement,
     chapter_texts,
+    compact_timing,
     render_chapter,
 )
 
@@ -60,7 +62,8 @@ class Counting(ChunkRenderer):
 
 def rendered(ch: Chapter):
     voice = Counting()
-    return voice, render_chapter(ch, voice, RATE, _Tracker())
+    audio, timing = render_chapter(ch, voice, RATE, _Tracker())
+    return voice, audio, timing
 
 
 class _Tracker:
@@ -81,7 +84,7 @@ def runs(audio: np.ndarray) -> list[tuple[str, float]]:
 
 
 def test_a_pause_sits_between_the_label_and_the_title_and_a_longer_one_after_the_title():
-    voice, audio = rendered(chapter("Chapter 6 Knowing the Source", body="Go on now."))
+    voice, audio, _ = rendered(chapter("Chapter 6 Knowing the Source", body="Go on now."))
     assert voice.said[:3] == ["Chapter 6.", "Knowing the Source", "Go on now."]
     assert runs(audio) == [
         ("sound", 2.0),                      # Chapter 6.
@@ -94,7 +97,7 @@ def test_a_pause_sits_between_the_label_and_the_title_and_a_longer_one_after_the
 
 
 def test_a_chapter_with_no_label_has_only_the_pause_after_its_title():
-    _, audio = rendered(chapter("Foreword", body="Go on now."))
+    _, audio, _ = rendered(chapter("Foreword", body="Go on now."))
     assert runs(audio) == [("sound", 1.0), ("silence", TITLE_PAUSE), ("sound", 3.0), ("silence", PARAGRAPH_PAUSE)]
 
 
@@ -102,7 +105,78 @@ def test_the_pause_between_label_and_title_is_audible_but_shorter_than_the_one_a
     assert SENTENCE_PAUSE < LABEL_PAUSE < TITLE_PAUSE
 
 
+def test_timing_records_every_segment_and_chunk_with_correct_offsets():
+    ch = chapter("Chapter 6 Knowing the Source", body="Go on now. And again.")
+    _, audio, timing = rendered(ch)
+    # Two announcement entries (label + title), then one paragraph segment
+    assert len(timing) == 3
+    assert timing[0]["kind"] == "announcement"
+    assert timing[0]["text"] == "Chapter 6."
+    assert timing[1]["kind"] == "announcement"
+    assert timing[1]["text"] == "Knowing the Source"
+    assert timing[2]["kind"] == "paragraph"
+    assert timing[2]["text"] == "Go on now. And again."
+    # The paragraph has one chunk (both sentences fit in MAX_CHUNK_CHARS)
+    assert len(timing[2]["chunks"]) == 1
+    assert timing[2]["chunks"][0]["text"] == "Go on now. And again."
+    # Timing is contiguous: each segment starts after the previous ends (with silence gaps)
+    for i in range(1, len(timing)):
+        assert timing[i]["start"] > timing[i - 1]["end"]
+    # Segment start/end bracket its chunks
+    seg = timing[2]
+    assert seg["start"] == seg["chunks"][0]["start"]
+    assert seg["end"] == seg["chunks"][-1]["end"]
+    # Total audio length equals the last silence's end plus the trailing pause
+    total_seconds = len(audio) / RATE
+    assert timing[-1]["end"] < total_seconds  # chunk end is before the trailing silence
+
+
+def test_timing_with_multiple_chunks():
+    long_body = "A short one. " + "This is a much longer sentence that keeps going and going. " * 8
+    ch = chapter("Opening", body=long_body)
+    _, _, timing = rendered(ch)
+    # "Opening" is one announcement, then one paragraph with multiple chunks
+    assert timing[0]["kind"] == "announcement"
+    seg = timing[1]
+    assert seg["kind"] == "paragraph"
+    assert len(seg["chunks"]) > 1
+    # Chunks are in order and non-overlapping
+    for i in range(1, len(seg["chunks"])):
+        assert seg["chunks"][i]["start"] > seg["chunks"][i - 1]["end"]
+
+
+def test_compact_timing_carries_each_chunks_word_count_and_no_text():
+    long_body = "A short one. " + "This is a much longer sentence that keeps going and going. " * 8
+    _, _, timing = rendered(chapter("Opening", body=long_body))
+    compact = compact_timing(timing)
+    paragraph = compact[1]
+    assert all("text" not in c for seg in compact for c in seg["chunks"])
+    assert len(paragraph["chunks"]) > 1
+    # the chunks' words, in order, are the paragraph's words: the page shares the paragraph's own words out by these
+    assert sum(c["words"] for c in paragraph["chunks"]) == len(long_body.split())
+    assert [c["words"] for c in paragraph["chunks"]] == [len(c["text"].split()) for c in timing[1]["chunks"]]
+
+
+def test_timing_carries_each_chunks_sentences_with_their_word_counts_and_starts():
+    _, _, timing = rendered(chapter("Opening", body="One two three. Four five six seven."))
+    chunk = timing[1]["chunks"][0]
+    sentences = chunk["sentences"]
+    assert [s["words"] for s in sentences] == [3, 4]
+    assert sentences[0]["start"] == chunk["start"]                       # the first sentence starts with its chunk
+    assert chunk["start"] < sentences[1]["start"] < chunk["end"]
+
+
+def test_sentence_starts_are_in_playback_seconds_and_the_compact_form_keeps_them_without_the_text():
+    _, _, timing = rendered(chapter("Opening", body="One two three. Four five six seven."))
+    raw = timing[1]["chunks"][0]["sentences"][1]["start"]
+    slow = _timing_for_speed(timing, 0.5)                                # atempo 0.5 doubles every time
+    assert slow[1]["chunks"][0]["sentences"][1]["start"] == pytest.approx(raw * 2, abs=0.001)
+    compact = compact_timing(slow)[1]["chunks"][0]
+    assert "text" not in compact and [s["words"] for s in compact["sentences"]] == [3, 4]
+    assert compact["sentences"][1]["start"] == slow[1]["chunks"][0]["sentences"][1]["start"]
+
+
 def test_progress_counts_exactly_what_the_voice_is_asked_for():
     ch = chapter("Chapter 6 Knowing the Source", body="One. Two.")
-    voice, _ = rendered(ch)
+    voice, _, _ = rendered(ch)
     assert chapter_texts(ch) == voice.said

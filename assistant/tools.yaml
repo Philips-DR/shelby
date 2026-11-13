@@ -15,6 +15,7 @@ servers:
   - name: meet-ai
     command: ${MEET_AI_HOME:-../meet-ai}/mcp
     cwd: ${MEET_AI_HOME:-../meet-ai}
+    files: ["${MEET_AI_AUDIO:-audio}"]
     env:
       # The model's key, given by name to the one tool that calls a model (notes and minutes). The backend withholds it from
       # every other tool (tools.py), so a key in .env never reaches web-ai, which reads arbitrary web pages. Empty when unset.

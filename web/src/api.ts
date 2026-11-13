@@ -345,6 +345,11 @@ export interface DeletedUpload { id: string; kind: UploadKind; name: string; fil
 export const deleteUpload = (id: string) =>
   request<DeletedUpload>('/api/uploads/delete', { method: 'POST', body: JSON.stringify({ id }) })
 
+export interface RenamedUpload { id: string; kind: UploadKind; old_name: string; new_name: string; path: string }
+
+export const renameUpload = (id: string, name: string) =>
+  request<RenamedUpload>('/api/uploads/rename', { method: 'POST', body: JSON.stringify({ id, name }) })
+
 export const answerApproval = (id: string, approve: boolean) =>
   request<{ approved: boolean }>(`/api/approvals/${encodeURIComponent(id)}`, {
     method: 'POST',
@@ -570,6 +575,12 @@ async function fetchBlob(path: string): Promise<Blob> {
     throw new ApiError(response.status, response.status === 404 ? 'That file is no longer there.' : response.statusText)
   }
   return response.blob()
+}
+
+/** A tool's file as JSON (the sidecar metadata beside an MP3, for instance). */
+export async function fetchFileJSON<T = unknown>(path: string): Promise<T> {
+  const blob = await fetchBlob(`/api/files?path=${encodeURIComponent(path)}`)
+  return JSON.parse(await blob.text()) as T
 }
 
 /** docu-ai reads only the top level of a folder, so that is all that is sent; anything

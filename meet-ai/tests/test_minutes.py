@@ -76,6 +76,7 @@ def test_the_meeting_name_is_a_claim_like_any_other():
 
 def test_the_date_comes_from_the_file_name_or_not_at_all():
     assert recorded_at("20260812_102457.m4a") == dt.datetime(2026, 8, 12, 10, 24, 57)
+    assert recorded_at("meeting-2026-11-11T10-17-55.webm") == dt.datetime(2026, 11, 11, 10, 17, 55)
     assert recorded_at("board meeting.m4a") is None
     assert recorded_at("20261399_999999.m4a") is None
 

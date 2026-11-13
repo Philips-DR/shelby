@@ -14,7 +14,7 @@ import re
 
 ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve",
         "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"]
-TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty"]
+TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
 ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
 
 
@@ -29,7 +29,84 @@ def roman_to_int(roman: str) -> int:
 def number_word(n: int) -> str:
     if n < 20:
         return ONES[n]
-    return TENS[n // 10] + ("-" + ONES[n % 10].lower() if n % 10 else "")
+    if n < 100:
+        return TENS[n // 10] + ("-" + ONES[n % 10].lower() if n % 10 else "")
+    w = int_to_words(n)
+    return w[0].upper() + w[1:]
+
+
+# --- Arabic numerals to words (every digit sequence the voice would otherwise read one at a time) ---
+
+
+def _under_thousand(n: int) -> str:
+    parts = []
+    if n >= 100:
+        parts.append(ONES[n // 100].lower() + " hundred")
+        n %= 100
+    if n >= 20:
+        t = TENS[n // 10].lower()
+        o = n % 10
+        parts.append(t + "-" + ONES[o].lower() if o else t)
+    elif n > 0:
+        parts.append(ONES[n].lower())
+    return " ".join(parts)
+
+
+def int_to_words(n: int) -> str:
+    if n == 0:
+        return "zero"
+    parts = []
+    for scale, label in ((1_000_000_000, "billion"), (1_000_000, "million"), (1_000, "thousand")):
+        if n >= scale:
+            parts.append(_under_thousand(n // scale) + " " + label)
+            n %= scale
+    if n > 0:
+        parts.append(_under_thousand(n))
+    return " ".join(parts)
+
+
+def year_to_words(n: int) -> str:
+    if n == 2000:
+        return "two thousand"
+    if 2001 <= n <= 2009:
+        return "two thousand " + ONES[n - 2000].lower()
+    hi, lo = divmod(n, 100)
+    front = _under_thousand(hi)
+    if lo == 0:
+        return front + " hundred"
+    if lo < 10:
+        return front + " oh " + ONES[lo].lower()
+    return front + " " + _under_thousand(lo)
+
+
+_DIGIT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+
+
+_ORDINAL_SPECIAL = {
+    "zero": "zeroth", "one": "first", "two": "second", "three": "third",
+    "five": "fifth", "eight": "eighth", "nine": "ninth", "twelve": "twelfth",
+}
+_ORDINAL_TENS = {
+    "twenty": "twentieth", "thirty": "thirtieth", "forty": "fortieth", "fifty": "fiftieth",
+    "sixty": "sixtieth", "seventy": "seventieth", "eighty": "eightieth", "ninety": "ninetieth",
+}
+
+
+def ordinal_to_words(n: int) -> str:
+    cardinal = int_to_words(n)
+    parts = cardinal.rsplit(" ", 1)
+    last = parts[-1]
+    prefix = parts[0] + " " if len(parts) > 1 else ""
+    if "-" in last:
+        tens_part, ones_part = last.rsplit("-", 1)
+        return prefix + tens_part + "-" + _ORDINAL_SPECIAL.get(ones_part, ones_part + "th")
+    if last in _ORDINAL_SPECIAL:
+        return prefix + _ORDINAL_SPECIAL[last]
+    if last in _ORDINAL_TENS:
+        return prefix + _ORDINAL_TENS[last]
+    if last in ("hundred", "thousand", "million", "billion"):
+        return prefix + last + "th"
+    return prefix + last + "th"
 
 
 ROMAN = r"[IVXL]+"
@@ -46,6 +123,11 @@ DIGIT_COLON = re.compile(r"(\d):(\d)")
 CAPS_RUN = re.compile(r"\b[A-Z]+(?:[\s,.'-]+[A-Z]+)+\b")
 CAPS_WORD = re.compile(r"\b[A-Z]{5,}\b")
 SMALL_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to", "with"}
+ORDINAL_NUM = re.compile(r"\b(\d+)(?:st|nd|rd|th)\b")
+DECIMAL_NUM = re.compile(r"\b(\d{1,6})\.(\d+)\b")
+YEAR_NUM = re.compile(r"(?<!\d)(1[1-9]\d{2}|20\d{2})(?!\d)")
+COMMA_NUM = re.compile(r"\b(\d{1,3}(?:,\d{3})+)\b")
+DIGITS = re.compile(r"(?<!\d\.)\b(\d{1,6})\b(?!\.\d)")
 ELLIPSIS = re.compile(r"\s*(?:\.\s+){2,}\.|\s*…")
 UNSPEAKABLE = re.compile(r"[~\[\]{}|^#*]")
 
@@ -78,6 +160,14 @@ def for_speech(text: str) -> str:
     text = NUMBERED.sub(_numbered, text)
     text = SCRIPTURE.sub(_scripture, text)
     text = DIGIT_COLON.sub(r"\1 \2", text)  # any other n:n (times, ratios): a colon cuts the sentence off
+    text = ORDINAL_NUM.sub(lambda m: ordinal_to_words(int(m.group(1))), text)
+    text = DECIMAL_NUM.sub(
+        lambda m: int_to_words(int(m.group(1))) + " point " + " ".join(_DIGIT_WORDS[int(d)] for d in m.group(2)),
+        text,
+    )
+    text = YEAR_NUM.sub(lambda m: year_to_words(int(m.group(1))), text)
+    text = COMMA_NUM.sub(lambda m: int_to_words(int(m.group(1).replace(",", ""))), text)
+    text = DIGITS.sub(lambda m: int_to_words(int(m.group(1))), text)
     text = CAPS_RUN.sub(_caps_run, text)
     text = CAPS_WORD.sub(lambda m: m.group().capitalize(), text)
     text = ELLIPSIS.sub("...", text)

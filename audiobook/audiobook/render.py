@@ -16,6 +16,7 @@ from .chunk import chunk_paragraph
 from .names import chapter_stem, slugify, speed_suffix
 from .plan import CHAPTER_PREFIX, Chapter
 from .preview import CHARS_PER_SECOND, RENDER_SPEED
+from .sentences import sentence_starts
 from .tts import Narrator
 
 CACHE_DIR = Path(".cache/audio")
@@ -169,26 +170,55 @@ def chapter_texts(chapter: Chapter) -> list[str]:
     return [*announcement(chapter)] + [chunk for seg in chapter.segments for chunk in chunk_paragraph(seg.text)]
 
 
-def render_chapter(chapter: Chapter, render: ChunkRenderer, sample_rate: int, tracker: ProgressTracker) -> np.ndarray:
+def render_chapter(chapter: Chapter, render: ChunkRenderer, sample_rate: int,
+                    tracker: ProgressTracker) -> tuple[np.ndarray, list[dict]]:
+    """Speak a chapter and return (audio, timing). Each timing entry is a segment with chunk-level
+    start/end in raw-audio seconds (before atempo); the caller divides by speed for playback time."""
     def speak(text: str) -> np.ndarray:
         started = time.monotonic()
         audio = render(text)
         tracker.chunk_done(text, time.monotonic() - started)
         return audio
 
-    pieces = []
+    pieces: list[np.ndarray] = []
+    timing: list[dict] = []
+    offset = 0
+
+    def add(audio: np.ndarray) -> None:
+        nonlocal offset
+        pieces.append(audio)
+        offset += len(audio)
+
     opening = announcement(chapter)
     for i, part in enumerate(opening):
-        pieces += [speak(part), _silence(LABEL_PAUSE if i < len(opening) - 1 else TITLE_PAUSE, sample_rate)]
+        chunk_start = offset / sample_rate
+        add(speak(part))
+        chunk_end = offset / sample_rate
+        timing.append({"kind": "announcement", "text": part, "start": chunk_start, "end": chunk_end, "chunks": [
+            {"text": part, "start": chunk_start, "end": chunk_end}]})
+        add(_silence(LABEL_PAUSE if i < len(opening) - 1 else TITLE_PAUSE, sample_rate))
+
     for seg in chapter.segments:
         is_heading = seg.kind in ("heading", "title")
         if is_heading:
-            pieces.append(_silence(HEADING_PAUSE_BEFORE, sample_rate))
+            add(_silence(HEADING_PAUSE_BEFORE, sample_rate))
+        seg_start = offset / sample_rate
+        seg_chunks: list[dict] = []
         for chunk in chunk_paragraph(seg.text):
-            pieces += [speak(chunk), _silence(SENTENCE_PAUSE, sample_rate)]
+            chunk_start = offset / sample_rate
+            spoken = speak(chunk)
+            add(spoken)
+            chunk_end = offset / sample_rate
+            sentences = [{"words": s["words"], "start": chunk_start + s["start"]} for s in sentence_starts(chunk, spoken, sample_rate)]
+            seg_chunks.append({"text": chunk, "start": chunk_start, "end": chunk_end, "sentences": sentences})
+            add(_silence(SENTENCE_PAUSE, sample_rate))
         after = HEADING_PAUSE_AFTER if is_heading else PARAGRAPH_PAUSE
-        pieces.append(_silence(after - SENTENCE_PAUSE, sample_rate))
-    return np.concatenate(pieces)
+        add(_silence(after - SENTENCE_PAUSE, sample_rate))
+        if seg_chunks:
+            timing.append({"kind": seg.kind, "text": seg.text, "start": seg_start,
+                           "end": seg_chunks[-1]["end"], "chunks": seg_chunks})
+
+    return np.concatenate(pieces), timing
 
 
 def _tempo(speed: float) -> list[str]:
@@ -228,6 +258,37 @@ def encode_m4b(wavs: list[Path], titles: list[str], sample_rate: int, out: Path,
     )
     concat_list.unlink()
     metadata_file.unlink()
+
+
+def _timing_for_speed(timing: list[dict], speed: float) -> list[dict]:
+    """Convert raw-audio-seconds timing to playback seconds (atempo divides time by speed)."""
+    def t(seconds: float) -> float:
+        return round(seconds / speed, 3)
+
+    def chunk(c: dict) -> dict:
+        out = {"text": c["text"], "start": t(c["start"]), "end": t(c["end"])}
+        if "sentences" in c:
+            out["sentences"] = [{"words": s["words"], "start": t(s["start"])} for s in c["sentences"]]
+        return out
+
+    return [{**seg, "start": t(seg["start"]), "end": t(seg["end"]), "chunks": [chunk(c) for c in seg["chunks"]]} for seg in timing]
+
+
+def compact_timing(timing: list[dict]) -> list[dict]:
+    """Timing without the text, for kept record labels: the frontend matches by index. Each chunk carries its word
+    count and, where they were worked out, the word count and start of each of its sentences, so the page can share
+    the segment's own words out among its chunks and sentences (the words of a segment's chunks, in order, are the
+    words of its text: chunking only joins and re-splits at whitespace)."""
+    def chunk(c: dict) -> dict:
+        out = {"start": c["start"], "end": c["end"], "words": len(c["text"].split())}
+        if "sentences" in c:
+            out["sentences"] = [{"words": s["words"], "start": s["start"]} for s in c["sentences"]]
+        return out
+
+    return [
+        {"kind": seg["kind"], "start": seg["start"], "end": seg["end"], "chunks": [chunk(c) for c in seg["chunks"]]}
+        for seg in timing
+    ]
 
 
 def render_book(
@@ -293,7 +354,7 @@ def _render_chapters(chapters, render, sr, tracker, pool, out_dir, album, speed,
                 tracker.chunk_done(text, seconds)
                 made.append(text)
             counted = _AlreadyCounted(tracker, made)
-        audio = render_chapter(chapter, render, sr, counted)
+        audio, timing = render_chapter(chapter, render, sr, counted)
         stem = f"{chapter_stem(number, chapter.title)}{speed_suffix(speed)}"
         wav = out_dir / f"{stem}.wav"
         scipy.io.wavfile.write(wav, sr, _to_int16(audio))
@@ -301,9 +362,11 @@ def _render_chapters(chapters, render, sr, tracker, pool, out_dir, album, speed,
         encode_mp3(wav, mp3, chapter.title, album, number, speed)
         seconds = len(audio) / sr / speed
         spoken = "\n\n".join([*announcement(chapter), *(seg.text for seg in chapter.segments)])
+        playback_segments = _timing_for_speed(timing, speed)
         mp3.with_suffix(".json").write_text(json.dumps(
             {"number": number, "title": chapter.title, "album": album, "speed": speed, "seconds": round(seconds, 1),
-             **(labels or {}), "text": spoken}, ensure_ascii=False, indent=1), encoding="utf-8")
+             **(labels or {}), "text": spoken, "segments": playback_segments},
+            ensure_ascii=False, indent=1), encoding="utf-8")
         if on_chapter_done:
             on_chapter_done(mp3, seconds)
         if m4b:

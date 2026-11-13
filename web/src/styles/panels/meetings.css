@@ -1,41 +1,10 @@
 /*
- * Meetings: a master-detail layout. The sidebar lists meetings; the main area shows one meeting's
- * detail or the new-meeting flow. Colours, sizes, radii and durations are tokens; nothing here
- * names a theme.
+ * Meetings: a single-panel layout like Audiobooks. The list, detail and new-meeting views replace
+ * each other in place; Back returns to the list. Colours, sizes, radii and durations are tokens;
+ * nothing here names a theme.
  */
 
-/* ---- master-detail layout ----------------------------------------------------------------------- */
-
-.mt {
-  display: flex;
-  gap: 0;
-  min-height: 420px;
-}
-
-.mt-sidebar {
-  width: 320px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--line);
-  padding: 8px 12px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  max-height: calc(100dvh - var(--bar-h) - 60px);
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-}
-.mt-main {
-  flex: 1;
-  min-width: 0;
-  padding: 0 0 0 24px;
-}
-
-/* the new-meeting flow uses .panel (vertical stack); override slot flex so it does not stretch */
-.mt-new-flow .mt-slot { flex: none; }
-
-/* ---- sidebar header ----------------------------------------------------------------------------- */
+/* ---- list header -------------------------------------------------------------------------------- */
 
 .mt-list-head {
   display: flex;
@@ -114,15 +83,10 @@
 .mt-mcard-chips .badge { font-size: 0.6875rem; }
 .mt-mcard .rec-dot { width: 10px; height: 10px; }
 
-/* recordings not transcribed yet: a row that is not itself a button, with its own */
+/* recordings not transcribed yet */
 .mt-pending { margin-top: 14px; }
-/* an h2 for the page's outline (the list has no heading above it), drawn as the small label h3 is */
 .mt-pending > h2 { font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); }
-.mt-mcard.is-pending { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; cursor: default; box-shadow: none; background: var(--surface-2); }
-.mt-mcard.is-pending:hover { border-color: var(--line); background: var(--surface-2); }
-.mt-pending-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.mt-pending-text .mt-mcard-meta { overflow-wrap: anywhere; }
-.mt-mcard.is-pending button { flex: none; min-height: 36px; }
+.mt-mcard.is-pending { box-shadow: none; background: var(--surface-2); }
 
 /* ---- back button (phone only on desktop, always visible on phone) ------------------------------- */
 
@@ -154,43 +118,19 @@
   background: var(--line);
 }
 
-/* ---- empty main (desktop, nothing selected) ----------------------------------------------------- */
-
-.mt-empty-main {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 320px;
-  padding: 40px;
-}
-
 /* ---- detail view -------------------------------------------------------------------------------- */
 
-.mt-detail .mt-outputs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  gap: 12px;
-}
-
-/* ---- responsive: phone -------------------------------------------------------------------------- */
-
-@media (max-width: 819px) {
-  .mt { flex-direction: column; }
-  .mt-sidebar {
-    width: 100%;
-    border-right: none;
-    max-height: none;
-    position: static;
-  }
-  .mt[data-view="detail"] .mt-sidebar,
-  .mt[data-view="new"] .mt-sidebar { display: none; }
-  .mt[data-view="list"] .mt-main { display: none; }
-  .mt-main { padding: 0; }
-}
-
-@media (min-width: 820px) {
-  .mt-back { display: none; }
-}
+.mt-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; }
+.mt-head .navtile { width: 44px; height: 44px; border-radius: 14px; color: var(--ink); }
+.mt-head-text { flex: 1 1 220px; min-width: 0; }
+.mt-head-text h2 { font-family: var(--font-display); font-size: var(--fs-xl); letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.mt-head-text .mt-head-facts { margin-top: 1px; }
+.mt-head-text .mt-mcard-chips { margin-top: 6px; }
+.mt-head .mt-delete { margin: 0; align-self: center; }
+.mt-rename { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mt-rename input { flex: 1 1 180px; min-width: 0; font-size: var(--fs-md); font-weight: 600; }
+.mt-rename button { min-height: 36px; padding: 0 12px; font-size: var(--fs-sm); }
+.mt-rename-btn { font-size: var(--fs-xs); font-weight: 600; color: var(--ink-3); vertical-align: middle; margin-left: 6px; padding: 2px 8px; }
 
 /* ================================================================================================
  * Kept: the original component styles for recording, transcription, write-up and the reader.

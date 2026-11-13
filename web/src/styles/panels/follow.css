@@ -1,0 +1,280 @@
+/*
+ * Follow along: the chapter's text as a full-screen layer (components/AudioFollow.tsx). Colours, type sizes and
+ * durations are tokens; the tool's colour arrives as --pa and marks the paragraph being read (a mark, never text),
+ * the bar's position as --progress, written every frame by the player engine. The sentence being spoken is moved by
+ * the DOM, a frame at a time, through the `read` and `on` classes on its sentences.
+ */
+
+.follow {
+  --pa-ink: color-mix(in srgb, var(--pa, var(--brand)) 64%, var(--ink));
+  --progress: 0;
+  --hit: color-mix(in srgb, var(--brand) 22%, transparent);   /* the mark behind the sentence being said */
+  position: fixed;
+  inset: 0;
+  z-index: 55;                       /* over the sheets (50), under search (60) and the delete question (70) */
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  color: var(--ink);
+  background: var(--bg);
+  outline: none;
+  animation: fade-in var(--dur-2) var(--ease);
+}
+
+.fo-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: max(10px, env(safe-area-inset-top)) var(--gutter) 6px;
+}
+.fo-title { flex: 1; display: grid; min-width: 0; }
+.fo-title b { font-family: var(--font-display); font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fo-title small { font-size: var(--fs-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fo-top-act { display: flex; align-items: center; gap: 2px; flex: none; }
+.fo-top-act button { width: 36px; min-height: 36px; padding: 0; }
+
+/* the text: scrolls under a line a third of the way down, fading out at the top and the foot */
+.fo-scroll {
+  position: relative;                /* the offset the follower measures a sentence's line from */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  padding: 0 var(--gutter);
+  mask-image: linear-gradient(to bottom, transparent 0, var(--ink) 12%, var(--ink) 80%, transparent 100%);
+}
+.fo-text { max-width: 44rem; margin: 0 auto; padding: 30vh 0 55vh; }
+.fo-note { margin: 0; color: var(--ink-2); font-size: var(--fs-md); }
+
+/* a paragraph: the same box in every state, so stepping forward moves nothing but colour */
+.fp {
+  margin: 0 0 0.9em -16px;
+  padding: 4px 16px;
+  font-family: var(--font-ui);
+  font-size: clamp(var(--fs-xl), 4vw, var(--fs-2xl));
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--ink-3);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: color var(--dur-3) var(--ease), box-shadow var(--dur-3) var(--ease);
+}
+.fp:hover { color: var(--ink-2); }
+.fp.next { color: var(--ink-2); }
+.fp.head { font-family: var(--font-display); font-weight: 700; }
+
+/* the one being read */
+.fp.now { color: var(--ink-2); box-shadow: inset 3px 0 0 var(--pa); }
+.fp.now.whole { color: var(--ink); background: var(--brand-soft); }   /* its words could not be shared out: lit whole */
+
+/* its sentences: the ones already said bright, the one being said marked, the rest softer */
+.fs.read { color: var(--ink); }
+.fs.on {
+  color: var(--ink);
+  background: var(--hit);
+  padding: 0.04em 0.18em;
+  margin: 0 -0.18em;
+  border-radius: 0.3em;
+  box-decoration-break: clone;       /* a sentence over two lines is marked on both */
+  -webkit-box-decoration-break: clone;
+}
+
+/* ---- page mode: smaller text, all paragraphs readable, the spoken one highlighted ---- */
+
+.follow[data-mode='page'] .fo-text { max-width: 52rem; padding: 16vh 0 40vh; }
+
+.follow[data-mode='page'] .fp {
+  font-size: var(--fs-lg);
+  line-height: 1.65;
+  color: var(--ink-2);
+  margin-bottom: 0.7em;
+}
+.follow[data-mode='page'] .fp.read { color: var(--ink-2); }
+.follow[data-mode='page'] .fp.next { color: var(--ink-2); }
+.follow[data-mode='page'] .fp.far { color: var(--ink-2); }
+.follow[data-mode='page'] .fp:hover { color: var(--ink); }
+
+.follow[data-mode='page'] .fp.now {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--pa, var(--brand)) 8%, transparent);
+  box-shadow: inset 3px 0 0 var(--pa);
+}
+.follow[data-mode='page'] .fp.now.whole { color: var(--ink); }
+
+/* ---- the waveform scrubber (replaces the thin progress line) ---- */
+
+.fo-wave {
+  position: relative;
+  height: 32px;
+  margin: 0 -2px;
+  cursor: pointer;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 6px;
+}
+.fo-wave:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.fo-wave svg { display: block; overflow: visible; }
+.fo-wave-rest rect { fill: color-mix(in srgb, var(--ink-3) 36%, transparent); }
+.fo-wave-played rect { fill: var(--pa-ink); }
+.fo-wave-played { clip-path: inset(0 calc((1 - var(--progress, 0)) * 100%) 0 0); }
+
+.fo-wave-head {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: calc(var(--progress, 0) * 100%);
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+  border-radius: 2px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease);
+}
+.fo-wave:hover .fo-wave-head,
+.fo-wave:focus-visible .fo-wave-head { opacity: 1; }
+
+/* the foot: where it is in the chapter, and the controls (the player's own buttons, see player.css) */
+.fo-bottom {
+  position: relative;
+  padding: 10px var(--gutter) max(12px, env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.fo-line { position: absolute; left: 0; right: 0; top: -1px; height: 3px; background: var(--line); pointer-events: none; }
+.fo-line i { position: absolute; inset: 0; background: var(--pa-ink); transform-origin: left; transform: scaleX(var(--progress, 0)); }
+.fo-controls { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 28rem; margin: 0 auto; }
+.follow[data-state='playing'] .pplay { box-shadow: 0 0 0 6px color-mix(in srgb, var(--pa, var(--brand)) 20%, transparent), var(--shadow-1); }
+
+/* shown once you have scrolled away */
+.fo-pill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 14px);
+  width: max-content;
+  margin: 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--bg);
+  background: var(--ink);
+  border: 0;
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-2);
+  animation: pop-in var(--dur-2) var(--ease);
+}
+.fo-pill:hover:not(:disabled) { background: var(--ink); border: 0; }
+
+/* ---- chapter list sheet ---- */
+
+.fo-chapters {
+  position: absolute;
+  inset: 0;
+  top: auto;
+  bottom: 0;
+  z-index: 3;
+  max-height: 70vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  border-radius: 20px 20px 0 0;
+  box-shadow: var(--shadow-2);
+  animation: rise var(--dur-2) var(--ease);
+}
+.fo-ch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px var(--gutter) 10px;
+  border-bottom: 1px solid var(--line);
+}
+.fo-ch-head b { font-family: var(--font-display); font-size: var(--fs-lg); }
+.fo-ch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fo-ch-item {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.fo-ch-item:last-child { border-bottom: 0; }
+.fo-ch-item.selected { background: var(--bg-2); }
+.fo-ch-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px var(--gutter);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  font-weight: 500;
+}
+.fo-ch-btn:hover:not(:disabled) { background: var(--bg-2); border: 0; border-radius: 0; }
+.fo-ch-item.current .fo-ch-btn { background: color-mix(in srgb, var(--pa, var(--brand)) 10%, transparent); }
+.fo-ch-acts { display: flex; align-items: center; gap: 4px; flex: none; padding-right: var(--gutter); }
+.fo-ch-del { color: var(--ink-3); }
+.fo-ch-del:hover { color: var(--danger); }
+.fo-ch-render {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--pa-ink);
+  border: 0;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+  animation: fade-in var(--dur-2) var(--ease);
+}
+.fo-ch-render:hover { opacity: 0.85; }
+.fo-ch-num {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--ink-2);
+  background: var(--bg-2);
+  border-radius: 50%;
+}
+.fo-ch-item.current .fo-ch-num { color: var(--bg); background: var(--pa-ink); }
+.fo-ch-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fo-ch-time { flex: none; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.fo-ch-eq {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.fo-ch-eq i {
+  width: 2px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--pa-ink);
+  transform-origin: bottom;
+  animation: fo-eq calc(var(--dur-3) * 2) ease-in-out infinite;
+}
+.fo-ch-eq i:nth-child(2) { animation-delay: calc(var(--dur-1) * -2); }
+.fo-ch-eq i:nth-child(3) { animation-delay: calc(var(--dur-1) * -4); }
+@keyframes fo-eq { 0%, 100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
+
+/* phone: chapter list takes most of the screen */
+@media (max-width: 639px) {
+  .fo-chapters { max-height: 80vh; }
+  .fo-ch-btn { min-height: 56px; }
+}
