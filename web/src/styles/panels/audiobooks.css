@@ -275,6 +275,27 @@
 
 .ab-delete { margin-top: 8px; align-self: flex-start; }
 
-/* ---- follow along: the button under the player, and the line saying why it is not there ------------------------------ */
-.ab-follow-row { display: flex; margin: 4px 0 8px; }
+/* ---- selected chapter row: highlight + reveal delete/render ---- */
+.ab-ch-row { cursor: pointer; border-radius: 8px; transition: background-color var(--dur-2) var(--ease); }
+.ab-ch.selected .ab-ch-row { background: color-mix(in srgb, var(--ab, var(--s-other)) 8%, transparent); }
+.ab-ch-del { color: var(--ink-3); animation: fade-in var(--dur-2) var(--ease); }
+.ab-ch-del:hover { color: var(--bad); }
+.ab-ch-render {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--ab, var(--brand));
+  border: 0;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+  animation: fade-in var(--dur-2) var(--ease);
+}
+.ab-ch-render:hover:not(:disabled) { opacity: 0.85; border: 0; }
+
+/* ---- follow along: the line saying why it is not available ------------------------------ */
 .ab-follow-note { margin: 4px 0 8px; }

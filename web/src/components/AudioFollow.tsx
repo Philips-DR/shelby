@@ -20,16 +20,15 @@
 //   - A mode toggle between "lyrics" (the original: large text, one paragraph focused, immersive) and "page"
 //     (smaller text, all paragraphs readable, the spoken one highlighted — better for skimming ahead).
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { call } from '../call'
-import { toolColor } from '../charts/palette'
 import { useWidth } from '../charts/useWidth'
 import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock } from '../player/engine'
 import { clock } from '../player/format'
 import { store } from '../player/storage'
 import { WAVE_BUCKETS } from '../player/waveform'
-import { IconClose, IconDown, IconForward, IconList, IconNext, IconPage, IconPause, IconPlay, IconPrevious, IconRewind, IconSpeak, IconTrash } from '../ui/icons'
+import { IconAudiobooks, IconClose, IconForward, IconList, IconNext, IconPage, IconPause, IconPlay, IconPrevious, IconRewind, IconSpeak, IconTrash } from '../ui/icons'
 import { activeSegment, spokenSegments, type SegmentTiming } from './audiobookTiming'
 import { unitAt, unitsFor, wordsOf, type Unit } from './audiobookSentences'
 import '../styles/player.css'
@@ -41,10 +40,9 @@ interface Page { segments: Para[]; truncated: boolean; next_start: number | null
 /** A chapter as far as the chapter list needs it. */
 export interface FollowChapter { number: number; label: string; speech: string; audio?: { name: string }[] }
 
-/** Where the line being read sits, as a share of the screen's height. */
-const ANCHOR = 0.36
-/** Keys that scroll the text when it has the focus: using one is taking over from the follower. */
-const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'])
+/** Where the highlighted text sits, as a share of the scroller's visible height.
+ * Slightly above center so the active sentence stays clear of the bottom fade mask. */
+const ANCHOR = 0.42
 /** A paragraph is restarted rather than skipped back from when this far into it. */
 const RESTART_AFTER = 2
 
@@ -208,46 +206,47 @@ function ChapterSheet({ chapters, current, onSelect, onClose, onDelete, onRender
   )
 }
 
-// ---- the paragraph being read: the only one with a span per sentence ------------------------------------------
+// ---- the sentence spans inside the paragraph being read -------------------------------------------------------
 
 const Sentences = memo(function Sentences({ words, units }: { words: string[]; units: Unit[] }) {
   return <>{units.map((u, i) => <Fragment key={i}>{i > 0 ? ' ' : ''}<span className="fs">{words.slice(u.first, u.last).join(' ')}</span></Fragment>)}</>
 })
 
-function Spoken({ text, seg, bullet, playing, time, anchor, seekTo }: {
-  text: string
-  seg: SegmentTiming
-  bullet: boolean
-  playing: boolean
-  time: number
-  anchor: (el: HTMLElement, force?: boolean) => void
-  seekTo: (seconds: number) => void
+// ---- sentence painting: renderless, subscribed to the player clock, paints the spans via the DOM. Only
+//      mounted for the paragraph being read, so its clock subscription does not re-render the others. ----------
+
+function Highlighter({ para, units, anchor }: {
+  para: React.RefObject<HTMLParagraphElement | null>
+  units: Unit[]
+  anchor: (el: HTMLElement) => void
 }) {
+  const { playing } = usePlayer()
+  const { time } = usePlayerClock()
   const act = usePlayerActions()
-  const root = useRef<HTMLParagraphElement>(null)
   const spans = useRef<HTMLElement[]>([])
   const last = useRef(-2)
 
-  const words = useMemo(() => wordsOf(text), [text])
-  const units = useMemo(() => unitsFor(words, seg.chunks), [words, seg])
-
   const paint = useCallback((t: number) => {
-    if (!units) return
     const i = unitAt(units, t)
     if (i === last.current) return
+    const prev = last.current
     last.current = i
     const list = spans.current
-    list.forEach((el, k) => { el.className = k < i ? 'fs read' : k === i ? 'fs on' : 'fs' })
+    if (prev >= 0 && i === prev + 1 && prev < list.length) {
+      if (list[prev]) list[prev]!.className = 'fs read'
+      if (list[i]) list[i]!.className = 'fs on'
+    } else {
+      list.forEach((el, k) => { el.className = k < i ? 'fs read' : k === i ? 'fs on' : 'fs' })
+    }
     const here = list[i]
     if (here) anchor(here)
   }, [units, anchor])
 
   useEffect(() => {
-    spans.current = Array.from(root.current?.querySelectorAll<HTMLElement>('.fs') ?? [])
+    spans.current = Array.from(para.current?.querySelectorAll<HTMLElement>('.fs') ?? [])
     last.current = -2
-    if (!units && root.current) anchor(root.current)
     paint(act.now())
-  }, [paint, act, units, anchor])
+  }, [paint, act, para])
 
   useEffect(() => {
     if (!playing) return
@@ -259,29 +258,55 @@ function Spoken({ text, seg, bullet, playing, time, anchor, seekTo }: {
 
   useEffect(() => { if (!playing) paint(act.now()) }, [playing, paint, act, time])
 
+  return null
+}
+
+// ---- every paragraph: the same DOM element whether active or not, so CSS transitions fire on the change ------
+
+const Paragraph = memo(function Paragraph({ index, kind, text, seg, bullet, anchor, seekTo, subscribe, getActive }: {
+  index: number; kind: string; text: string; seg: SegmentTiming
+  bullet: boolean
+  anchor: (el: HTMLElement) => void; seekTo: (seconds: number) => void
+  subscribe: (l: () => void) => () => void; getActive: () => number
+}) {
+  const place = useSyncExternalStore(subscribe, () => {
+    const a = getActive()
+    return a === index ? 'now' : index < a ? 'read' : a + 1 === index ? 'next' : 'far'
+  })
+  const isActive = place === 'now'
+  const root = useRef<HTMLParagraphElement>(null)
+  const words = useMemo(() => wordsOf(text), [text])
+  const units = useMemo(() => isActive ? unitsFor(words, seg.chunks) : null, [isActive, words, seg])
+  const head = kind === 'heading' || kind === 'title'
+
+  useEffect(() => {
+    if (isActive && !units && root.current) anchor(root.current)
+  }, [isActive, units, anchor])
+
   const onClick = (e: React.MouseEvent) => {
-    const hit = (e.target as HTMLElement).closest('.fs')
-    const at = hit ? spans.current.indexOf(hit as HTMLElement) : -1
-    seekTo(units && at >= 0 ? units[at]!.start : seg.start)
+    if (isActive && units) {
+      const hit = (e.target as HTMLElement).closest('.fs')
+      if (hit && root.current) {
+        const all = root.current.querySelectorAll('.fs')
+        const at = Array.prototype.indexOf.call(all, hit)
+        if (at >= 0 && units[at]) { seekTo(units[at]!.start); return }
+      }
+    }
+    seekTo(seg.start)
   }
 
   return (
-    <p ref={root} className={`fp now ${units ? 'units' : 'whole'}`} aria-current="true" onClick={onClick}>
+    <p
+      ref={root}
+      data-i={index}
+      className={`fp ${place} ${isActive && units ? 'units' : isActive ? 'whole' : ''} ${head ? 'head' : ''}`}
+      aria-current={isActive || undefined}
+      onClick={onClick}
+    >
       {bullet && '• '}
-      {units ? <Sentences words={words} units={units} /> : text}
-    </p>
-  )
-}
-
-// ---- every other paragraph: plain text, redrawn only when its place relative to the one being read changes ----
-
-const Plain = memo(function Plain({ index, kind, text, place, seekTo, start }: {
-  index: number; kind: string; text: string; place: 'read' | 'next' | 'far'; seekTo: (seconds: number) => void; start: number
-}) {
-  const head = kind === 'heading' || kind === 'title'
-  return (
-    <p data-i={index} className={`fp ${place} ${head ? 'head' : ''}`} onClick={() => seekTo(start)}>
-      {kind === 'list_item' && '• '}{text}
+      {isActive && units
+        ? <><Sentences words={words} units={units} /><Highlighter para={root} units={units} anchor={anchor} /></>
+        : text}
     </p>
   )
 })
@@ -300,15 +325,15 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
   onRenderChapter?: (chapter: number) => void
 }) {
   const { playing, track } = usePlayer()
-  const { time } = usePlayerClock()
+  const { time, duration } = usePlayerClock()
   const act = usePlayerActions()
   const [paras, setParas] = useState<Para[] | null>(null)
   const [error, setError] = useState('')
-  const [following, setFollowing] = useState(true)
-  const followingRef = useRef(true)
   const root = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const lastTop = useRef(-1)
+  const scrollFrame = useRef(0)
+  const scrollGoal = useRef<number | null>(null)
   const opener = useRef<Element | null>(null)
 
   const [mode, setMode] = useState<'lyrics' | 'page'>(() => store.read(MODE_KEY) === 'page' ? 'page' : 'lyrics')
@@ -352,31 +377,50 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
     return () => { if (opener.current instanceof HTMLElement) opener.current.focus() }
   }, [])
 
-  // Keep the line being read where the eye is. Called when the word changes; moves only when its line changes.
-  const anchor = useCallback((el: HTMLElement, force = false) => {
+  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), [])
+
+  // Reset scroll state when the chapter changes so the first scroll is instant.
+  useEffect(() => { scrollGoal.current = null; lastTop.current = -1 }, [chapter.number])
+
+  // Keep the highlighted element at ANCHOR of the scroller's visible height, using a per-frame
+  // lerp instead of CSS scroll-behavior so the text tracks the voice without the browser's
+  // uncontrollable smooth-scroll lag. First scroll is instant (the view is still fading in).
+  const anchor = useCallback((el: HTMLElement) => {
     const box = scroller.current
-    if (!box || (!followingRef.current && !force)) return
-    const top = el.offsetTop
-    if (top === lastTop.current && !force) return
-    lastTop.current = top
-    box.scrollTo({ top: top - box.clientHeight * ANCHOR })
+    if (!box) return
+    const elMid = el.offsetTop + el.offsetHeight / 2
+    if (Math.abs(elMid - lastTop.current) < 2) return
+    lastTop.current = elMid
+    const goal = elMid - box.clientHeight * ANCHOR
+
+    if (scrollGoal.current === null) {
+      box.scrollTop = goal
+      scrollGoal.current = goal
+      return
+    }
+
+    scrollGoal.current = goal
+    if (scrollFrame.current) return
+
+    const step = () => {
+      const target = scrollGoal.current!
+      const diff = target - box.scrollTop
+      if (Math.abs(diff) < 0.5) {
+        box.scrollTop = target
+        scrollFrame.current = 0
+        return
+      }
+      box.scrollTop += diff * 0.2
+      scrollFrame.current = requestAnimationFrame(step)
+    }
+    scrollFrame.current = requestAnimationFrame(step)
   }, [])
 
   const follow = useCallback(() => {
-    followingRef.current = true
-    setFollowing(true)
     lastTop.current = -1
-    const target = scroller.current?.querySelector<HTMLElement>('.fw.on, .fp.now')
-    if (target) anchor(target, true)
+    const target = scroller.current?.querySelector<HTMLElement>('.fs.on, .fp.now')
+    if (target) anchor(target)
   }, [anchor])
-
-  // The reader takes over by scrolling themselves: wheel, touch, a drag on the scrollbar or a key. Programmatic
-  // scrolling fires none of these, which is why it is these and not the scroll event.
-  const letGo = useCallback(() => {
-    if (!followingRef.current) return
-    followingRef.current = false
-    setFollowing(false)
-  }, [])
 
   const seekTo = useCallback((seconds: number) => { act.seek(seconds); follow() }, [act, follow])
 
@@ -387,26 +431,35 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
     follow()
   }, [mode, follow])
 
-  // The paragraph being read follows the audio a frame at a time, like the words (the clock ticks four times a
-  // second, which let a paragraph change trail the voice). State changes only when the paragraph does.
-  const [active, setActive] = useState(-1)
+  // The paragraph being read: tracked outside React state so a change re-renders only the 2-4 paragraphs whose
+  // place actually changes (via useSyncExternalStore in Paragraph), not the entire list.
+  const activeRef = useRef(-1)
+  const activeListeners = useRef(new Set<() => void>())
+  const subscribeActive = useCallback((l: () => void) => { activeListeners.current.add(l); return () => { activeListeners.current.delete(l) } }, [])
+  const getActive = useCallback(() => activeRef.current, [])
+  const setActiveVal = useCallback((v: number) => {
+    if (v === activeRef.current) return
+    activeRef.current = v
+    for (const l of activeListeners.current) l()
+  }, [])
+
   useEffect(() => {
     if (!playing) return
     let frame = 0
-    const tick = () => { setActive(activeSegment(segs, act.now())); frame = requestAnimationFrame(tick) }
+    const tick = () => { setActiveVal(activeSegment(segs, act.now())); frame = requestAnimationFrame(tick) }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [segs, act, playing])
-  // Paused, or sought while paused: where the clock says.
-  useEffect(() => { if (!playing) setActive(activeSegment(segs, act.now())) }, [segs, act, playing, time])
+  }, [segs, act, playing, setActiveVal])
+  useEffect(() => { if (!playing) setActiveVal(activeSegment(segs, act.now())) }, [segs, act, playing, time, setActiveVal])
   const aligned = paras !== null && paras.length === segs.length
 
   const go = (to: number) => { const seg = segs[Math.min(Math.max(0, to), segs.length - 1)]; if (seg) seekTo(seg.start) }
   const previous = () => {
-    const seg = segs[active]
-    go(seg && time - seg.start > RESTART_AFTER ? active : active - 1)
+    const a = activeRef.current
+    const seg = segs[a]
+    go(seg && time - seg.start > RESTART_AFTER ? a : a - 1)
   }
-  const next = () => go(active + 1)
+  const next = () => go(activeRef.current + 1)
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -435,7 +488,7 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
       tabIndex={-1}
       data-state={playing ? 'playing' : 'paused'}
       data-mode={mode}
-      style={{ '--pa': toolColor('audiobook') } as CSSProperties}
+      style={{ '--pa': '#06b6d4' } as CSSProperties}
       onKeyDown={onKey}
     >
       <div className="fo-top">
@@ -470,10 +523,6 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
         role="region"
         aria-label={`Text of ${chapter.label}`}
         tabIndex={0}
-        onWheel={letGo}
-        onTouchMove={letGo}
-        onPointerDown={(e) => { if (e.target === e.currentTarget) letGo() }}
-        onKeyDown={(e) => { if (e.target === e.currentTarget && SCROLL_KEYS.has(e.key)) letGo() }}
       >
         <div className="fo-text">
           {!paras && !error && <p className="fo-note" role="status">Opening the text…</p>}
@@ -483,20 +532,36 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
               The text no longer matches this recording ({paras.length} paragraphs now, {segs.length} when it was made), so it cannot be followed. Render the chapter again to follow along.
             </p>
           )}
-          {aligned && paras!.map((p, i) => {
-            const seg = segs[i]!
-            if (i === active) {
-              return <Spoken key={i} text={p.text} seg={seg} bullet={p.kind === 'list_item'} playing={playing} time={time} anchor={anchor} seekTo={seekTo} />
-            }
-            return <Plain key={i} index={i} kind={p.kind} text={p.text} start={seg.start} seekTo={seekTo} place={i < active ? 'read' : i === active + 1 ? 'next' : 'far'} />
-          })}
+          {aligned && paras!.map((p, i) => (
+            <Paragraph
+              key={i}
+              index={i}
+              kind={p.kind}
+              text={p.text}
+              seg={segs[i]!}
+              bullet={p.kind === 'list_item'}
+              anchor={anchor}
+              seekTo={seekTo}
+              subscribe={subscribeActive}
+              getActive={getActive}
+            />
+          ))}
         </div>
       </div>
 
       <div className="fo-bottom">
-        {!following && (
-          <button className="fo-pill" onClick={follow}><IconDown size={16} aria-hidden />Back to now</button>
-        )}
+        <div className="fo-now-playing">
+          <span className="fo-np-tile" aria-hidden><IconAudiobooks size={18} strokeWidth={2} /></span>
+          <span className="fo-np-info">
+            <b>{chapter.label}</b>
+            <small>{track?.album ?? book}</small>
+          </span>
+          <span className="fo-np-time">
+            <span>{clock(time)}</span>
+            <span className="fo-np-sep">/</span>
+            <span>{clock(duration)}</span>
+          </span>
+        </div>
         <FoWave onSeek={() => follow()} />
         <div className="fo-controls">
           <button className="pskip" aria-label="Previous paragraph" title="Previous paragraph" disabled={!aligned} onClick={previous}><IconPrevious size={20} aria-hidden /></button>

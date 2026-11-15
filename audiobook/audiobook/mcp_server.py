@@ -161,6 +161,22 @@ def create_audiobook_server(paths: ServerPaths, speaker: Speaker | None = None) 
             return _failed(error)
 
     @server.tool(
+        name="exclude_chapters",
+        title="Hide or unhide chapters",
+        description=(
+            "Set the list of chapter numbers to exclude from a book's chapter list. "
+            "Pass an empty list to clear all exclusions. Returns the current exclusion list."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    )
+    def _exclude_chapters(pdf: str, chapters: list[int]) -> dict:
+        try:
+            result = operations.set_excluded_chapters(operations.pdf_file(pdf), chapters)
+            return {"excluded": result}
+        except FAILURES as error:
+            return _failed(error)
+
+    @server.tool(
         name="read_chapter",
         title="Read a chapter's narrated text",
         description=(

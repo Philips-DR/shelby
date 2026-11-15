@@ -59,6 +59,9 @@ mail-ai (plus the wider drafting token, once made with `./auth mail-compose`) â€
 browser only for the ones that are dead. `./auth --check` reports without signing in. Settings
 go in `.env`, which `./setup` creates from `.env.example`.
 
+**Google sign-in** (docu-ai and mail-ai) needs a one-time Google Cloud setup: create a project,
+enable the APIs and download an OAuth client file. See [`GOOGLE_SETUP.md`](GOOGLE_SETUP.md).
+
 ## Every day
 
 ```bash

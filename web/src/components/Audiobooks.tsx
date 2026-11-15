@@ -36,7 +36,7 @@ import { useAppState } from '../state'
 import { ConfirmDelete, sizeOf } from '../ui/ConfirmDelete'
 import { DropZone } from '../ui/DropZone'
 import {
-  IconAlert, IconAudiobooks, IconBack, IconCheck, IconChevron, IconClose, IconDocuments, IconDownload, IconFail, IconFollow, IconMeetings,
+  IconAlert, IconAudiobooks, IconBack, IconCheck, IconChevron, IconClose, IconDocuments, IconDownload, IconFail, IconMeetings,
   IconOk, IconPlay, IconRefresh, IconSpark, IconStop, IconTrash, IconUpload, IconZap,
 } from '../ui/icons'
 import { Empty } from '../ui/Empty'
@@ -94,6 +94,7 @@ interface Overview {
   title?: string
   author?: string | null
   chapters?: Chapter[]
+  excluded?: number[]
   speech?: string
   render_time?: string
   citations_removed?: number
@@ -116,6 +117,8 @@ interface AudioBook {
   author?: string | null
   files: AudioEntry[]
 }
+
+interface ChapterDeletePlan { nums: number[]; withAudio: number[]; withoutAudio: number[]; title: string; facts: [string, string][] }
 
 const VOICES_OPEN = 'ab-voices-open'
 
@@ -867,7 +870,7 @@ function Reader({ pdf, chapter, timing, playing, onClose }: {
 
 /** One chapter: tick it to render it, play it once it is rendered, read what will be spoken. Its text and its
  *  player open under it: below the whole list, a phone showed nothing where the button was pressed. */
-function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, reading, following, onFollow, onPlayChapter, onDeleteAudio, onRenderChapter, kept, onToggle, onRead }: {
+function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, reading, following, selected, onSelect, onFollow, onPlayChapter, onDeleteAudio, onRenderChapter, kept, onToggle, onRead }: {
   pdf: string
   /** Bumped when corrections are saved, so open text is read again with them applied. */
   version: number
@@ -879,6 +882,8 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
   book: string
   reading: boolean
   following: boolean
+  selected: boolean
+  onSelect: () => void
   onFollow: (on: boolean) => void
   onPlayChapter?: (chapter: number) => void
   onDeleteAudio?: (chapter: number) => void
@@ -895,17 +900,17 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
   const followable = !!timing && spokenSegments(timing).length > 0
   const width = longest > 0 ? Math.max(2, (chapter.words / longest) * 100) : 0
   return (
-    <li id={`ab-ch-${chapter.number}`} className={`ab-ch ${chosen ? '' : 'off'} ${current ? 'loaded' : ''}`}>
-      <div className="ab-ch-row">
-        <label className="ab-ch-pick">
-          <input type="checkbox" checked={chosen} onChange={onToggle} />
+    <li id={`ab-ch-${chapter.number}`} className={`ab-ch ${chosen ? '' : 'off'} ${current ? 'loaded' : ''} ${selected ? 'selected' : ''}`}>
+      <div className="ab-ch-row" onClick={onSelect}>
+        <span className="ab-ch-pick">
+          <input type="checkbox" checked={chosen} onChange={onToggle} onClick={(e) => e.stopPropagation()} />
           <span className="ab-ch-title">{chapter.label}{chapter.appendix && <span className="muted"> · appendix</span>}</span>
-        </label>
+        </span>
         <span className="ab-ch-len" title={`${chapter.words.toLocaleString()} words`}>
           <span className="ab-ch-bar" aria-hidden><i style={{ width: `${width}%` }} /></span>
           <span className="small muted">{chapter.speech}</span>
         </span>
-        <span className="ab-ch-act">
+        <span className="ab-ch-act" onClick={(e) => e.stopPropagation()}>
           <span className="ab-ch-play">
             {audio && !current && (
               <button className="ab-play" disabled={busy} aria-busy={busy} aria-label={`Play ${chapter.label}`} onClick={() => void play()}>
@@ -918,14 +923,19 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
           <button className="ghost" aria-pressed={reading} aria-label={`${reading ? 'Hide' : 'Read'} the text of ${chapter.label}`} onClick={onRead}>
             <IconDocuments size={16} aria-hidden /><span className="ab-btn-label">{reading ? 'Hide' : 'Text'}</span>
           </button>
+          {selected && onDeleteAudio && (
+            <button className="ghost ab-ch-del" aria-label={`Delete audio for ${chapter.label}`} title="Delete audio" onClick={() => onDeleteAudio(chapter.number)}>
+              <IconTrash size={16} aria-hidden />
+            </button>
+          )}
+          {selected && !audio && onRenderChapter && (
+            <button className="ab-ch-render" aria-label={`Render ${chapter.label}`} onClick={() => onRenderChapter(chapter.number)}>
+              <IconSpark size={16} aria-hidden /><span className="ab-btn-label">Render</span>
+            </button>
+          )}
         </span>
       </div>
-      {current && <AudioPlayer onClose={close} />}
-      {current && followable && (
-        <div className="ab-follow-row">
-          <button onClick={() => onFollow(true)}><IconFollow size={16} aria-hidden />Follow along</button>
-        </div>
-      )}
+      {current && <AudioPlayer onClose={close} onTap={followable ? () => onFollow(true) : undefined} />}
       {current && timing === null && (
         <p className="small muted ab-follow-note">This recording has no word timing. Render the chapter again to follow along.</p>
       )}
@@ -959,6 +969,7 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
   const overview = usePoll(() => call<Overview>('audiobook__preview_book', { pdf }), 3_600_000)
   const [picked, setPicked] = useState<Set<number> | null>(null)
   const [reading, setReading] = useState<number | null>(null)
+  const [selectedChs, setSelectedChs] = useState<Set<number>>(new Set())
   // The chapter shown full-screen with its words lit as they are said. A layer: Back closes it (useLayer.ts).
   const [following, setFollowing] = useState<number | null>(null)
   useLayer('ab-follow', following, setFollowing)
@@ -1025,7 +1036,15 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
     void start('audiobook__start_analysis', { pdf })
   }, [data?.analysed, running])
 
-  const chapters = data?.chapters ?? []
+  const excluded = useMemo(() => new Set(data?.excluded ?? []), [data?.excluded])
+
+  const excludeChapters = useCallback(async (nums: number[]) => {
+    const merged = [...new Set([...excluded, ...nums])]
+    await call('audiobook__exclude_chapters', { pdf, chapters: merged })
+    await overview.reload()
+  }, [pdf, excluded, overview])
+
+  const chapters = (data?.chapters ?? []).filter(c => !excluded.has(c.number))
   // Until you tick something, the chapters still to render: a finished chapter is not offered again by itself.
   const chosen = picked ?? unrendered(chapters)
   const cloned = voices.filter((v) => v.kind === 'cloned')
@@ -1065,6 +1084,16 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
   const readingThis = running && job?.kind === 'analyse' && job.target === mine
 
   const act = usePlayerActions()
+  const { track: playerTrack } = usePlayer()
+  const playerChapter = playerTrack?.home?.chapter
+  const playerBook = playerTrack?.home?.book
+
+  // When the player auto-advances to the next chapter of this book, follow along with it.
+  useEffect(() => {
+    if (following === null || playerBook !== mine || playerChapter == null) return
+    if (playerChapter !== following) setFollowing(playerChapter)
+  }, [playerChapter, playerBook, following, mine])
+
   const playAndFollow = useCallback(async (num: number) => {
     const ch = chapters.find(c => c.number === num)
     if (!ch?.audio?.[0]) return
@@ -1074,15 +1103,57 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
     setFollowing(num)
   }, [chapters, data?.pdf, pdf, title, act])
 
-  const deleteChapterAudio = useCallback(async (num: number) => {
-    const ch = chapters.find(c => c.number === num)
-    if (!ch?.audio?.length) return
-    const ids = ch.audio.filter(a => a.id).map(a => a.id!)
-    if (ids.length > 0) {
-      try { await deleteKept(ids) } catch { /* kept may already be gone */ }
+  const [chapterDelete, setChapterDelete] = useState<ChapterDeletePlan | null>(null)
+  const [chapterDeleteBusy, setChapterDeleteBusy] = useState(false)
+  const [chapterDeleteError, setChapterDeleteError] = useState('')
+
+  const askDeleteChapters = useCallback((num: number) => {
+    const nums = selectedChs.has(num) ? [...selectedChs] : [num]
+    const allChapters = data?.chapters ?? []
+    const withAudio = nums.filter(n => (allChapters.find(c => c.number === n)?.audio?.length))
+    const withoutAudio = nums.filter(n => !(allChapters.find(c => c.number === n)?.audio?.length))
+
+    const facts: [string, string][] = []
+    if (nums.length === 1) {
+      const ch = allChapters.find(c => c.number === nums[0])
+      if (ch) facts.push(['Chapter', ch.label])
+      facts.push(['Type', withAudio.length ? 'Rendered (audio will be deleted)' : 'Unrendered (will be hidden)'])
+    } else {
+      if (withAudio.length) facts.push(['Rendered chapters', `${withAudio.length} (audio will be deleted)`])
+      if (withoutAudio.length) facts.push(['Unrendered chapters', `${withoutAudio.length} (will be hidden)`])
+      facts.push(['Total', `${nums.length} chapter${nums.length > 1 ? 's' : ''}`])
     }
-    await overview.reload()
-  }, [chapters, overview])
+
+    const dlgTitle = nums.length === 1
+      ? `Delete ${allChapters.find(c => c.number === nums[0])?.label ?? `chapter ${nums[0]}`}?`
+      : `Delete ${nums.length} chapters?`
+
+    setChapterDeleteError('')
+    setChapterDelete({ nums, withAudio, withoutAudio, title: dlgTitle, facts })
+  }, [data?.chapters, selectedChs])
+
+  const confirmDeleteChapters = useCallback(async () => {
+    if (!chapterDelete) return
+    setChapterDeleteBusy(true)
+    setChapterDeleteError('')
+    try {
+      const ids = chapterDelete.withAudio.flatMap(n =>
+        (data?.chapters ?? []).find(c => c.number === n)?.audio?.filter(a => a.id).map(a => a.id!) ?? [])
+      if (ids.length > 0) {
+        try { await deleteKept(ids) } catch { /* kept may already be gone */ }
+        await overview.reload()
+      }
+      if (chapterDelete.withoutAudio.length > 0) {
+        await excludeChapters(chapterDelete.withoutAudio)
+      }
+      setSelectedChs(new Set())
+      setChapterDelete(null)
+    } catch (e) {
+      setChapterDeleteError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setChapterDeleteBusy(false)
+    }
+  }, [chapterDelete, data?.chapters, overview, excludeChapters])
 
   const renderChapter = useCallback(async (num: number) => {
     await start('audiobook__start_render', {
@@ -1182,9 +1253,11 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
                     book={title}
                     reading={reading === c.number}
                     following={following === c.number}
+                    selected={selectedChs.has(c.number)}
+                    onSelect={() => setSelectedChs((prev) => { const next = new Set(prev); next.has(c.number) ? next.delete(c.number) : next.add(c.number); return next })}
                     onFollow={(on) => setFollowing(on ? c.number : null)}
                     onPlayChapter={playAndFollow}
-                    onDeleteAudio={deleteChapterAudio}
+                    onDeleteAudio={askDeleteChapters}
                     onRenderChapter={renderChapter}
                     kept={kept}
                     onToggle={() => toggle(c.number)}
@@ -1305,6 +1378,18 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
         </>
       )}
       {error && !data?.analysed && <p className="error">{error}</p>}
+      {chapterDelete && (
+        <ConfirmDelete
+          title={chapterDelete.title}
+          facts={chapterDelete.facts}
+          keeps={chapterDelete.withoutAudio.length > 0 ? 'Hidden chapters can be restored by re-reading the book.' : undefined}
+          verb={chapterDelete.nums.length === 1 ? 'Delete' : `Delete ${chapterDelete.nums.length} chapters`}
+          busy={chapterDeleteBusy}
+          error={chapterDeleteError}
+          onConfirm={() => void confirmDeleteChapters()}
+          onCancel={() => setChapterDelete(null)}
+        />
+      )}
     </section>
   )
 }
@@ -1523,6 +1608,12 @@ export function Audiobooks() {
   const finished = usePoll(() => call<{ audiobooks: AudioBook[] }>('audiobook__list_audiobooks'), 30000)
   const keptPoll = usePoll(() => getKept('audiobook'), 30000)
   const job = status.data?.job ?? null
+  const [hiddenJobId, setHiddenJobId] = useState('')
+  useEffect(() => {
+    if (job?.state === 'done') setHiddenJobId(job.id)
+    else if (job?.state === 'running') setHiddenJobId('')
+  }, [job?.id, job?.state])
+  const visibleJob = job && job.id !== hiddenJobId ? job : null
 
   // Chapters finish one by one during a render, so the audio follows the job; and the server says when it has taken
   // something in, which is a moment after the tool made it.
@@ -1582,12 +1673,12 @@ export function Audiobooks() {
     return (shelf?.upload && overviews[shelf.upload.path]?.title) || shelf?.audio?.title || undefined
   }
   // The job's book, unless it is the one open: what "Open the book" on the job card opens.
-  const jobBook = job && (job.kind === 'analyse' || job.kind === 'render') && stem(job.target) !== stem(book)
-    && uploads.data?.books.some((u) => u.path === job.target) ? job.target : ''
+  const jobBook = visibleJob && (visibleJob.kind === 'analyse' || visibleJob.kind === 'render') && stem(visibleJob.target) !== stem(book)
+    && uploads.data?.books.some((u) => u.path === visibleJob.target) ? visibleJob.target : ''
 
   return (
     <div className="panel ab-page" style={style({ '--ab': toolColor('audiobook') })}>
-      <JobCard job={job} name={job ? titleFor(job.target) : undefined} samples={samples} reload={status.reload} openBook={jobBook ? () => open(jobBook) : undefined} />
+      <JobCard job={visibleJob} name={visibleJob ? titleFor(visibleJob.target) : undefined} samples={samples} reload={status.reload} openBook={jobBook ? () => open(jobBook) : undefined} />
       {book ? (
         <Book
           key={book}

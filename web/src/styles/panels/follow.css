@@ -7,44 +7,75 @@
 
 .follow {
   --pa-ink: color-mix(in srgb, var(--pa, var(--brand)) 64%, var(--ink));
+  --pa-soft: color-mix(in srgb, var(--pa, var(--brand)) 14%, transparent);
+  --pa-glow: color-mix(in srgb, var(--pa, var(--brand)) 30%, transparent);
   --progress: 0;
-  --hit: color-mix(in srgb, var(--brand) 22%, transparent);   /* the mark behind the sentence being said */
+  --hit: color-mix(in srgb, var(--pa, var(--brand)) 28%, transparent);
   position: fixed;
   inset: 0;
-  z-index: 55;                       /* over the sheets (50), under search (60) and the delete question (70) */
+  z-index: 55;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   color: var(--ink);
-  background: var(--bg);
+  background:
+    radial-gradient(ellipse 140% 50% at 50% -5%, color-mix(in srgb, var(--pa, var(--brand)) 18%, transparent) 0%, transparent 70%),
+    radial-gradient(ellipse 80% 30% at 80% 100%, color-mix(in srgb, var(--pa, var(--brand)) 8%, transparent) 0%, transparent 70%),
+    var(--bg);
+  overflow: hidden;
   outline: none;
-  animation: fade-in var(--dur-2) var(--ease);
+  animation: follow-in 500ms var(--ease);
 }
+@keyframes follow-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); backdrop-filter: blur(0); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---- header: frosted, floating ---- */
 
 .fo-top {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: max(10px, env(safe-area-inset-top)) var(--gutter) 6px;
+  background: var(--surface-glass);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border-bottom: 1px solid var(--line);
 }
 .fo-title { flex: 1; display: grid; min-width: 0; }
-.fo-title b { font-family: var(--font-display); font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fo-title small { font-size: var(--fs-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fo-title b {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fo-title small {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pa-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fo-top-act { display: flex; align-items: center; gap: 2px; flex: none; }
 .fo-top-act button { width: 36px; min-height: 36px; padding: 0; }
 
 /* the text: scrolls under a line a third of the way down, fading out at the top and the foot */
 .fo-scroll {
-  position: relative;                /* the offset the follower measures a sentence's line from */
+  position: relative;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
   padding: 0 var(--gutter);
-  mask-image: linear-gradient(to bottom, transparent 0, var(--ink) 12%, var(--ink) 80%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, var(--ink) 8%, var(--ink) 88%, transparent 100%);
 }
 .fo-text { max-width: 44rem; margin: 0 auto; padding: 30vh 0 55vh; }
 .fo-note { margin: 0; color: var(--ink-2); font-size: var(--fs-md); }
 
-/* a paragraph: the same box in every state, so stepping forward moves nothing but colour */
+/* ---- paragraphs: only the active one is fully visible ---- */
+
 .fp {
   margin: 0 0 0.9em -16px;
   padding: 4px 16px;
@@ -53,53 +84,68 @@
   font-weight: 500;
   line-height: 1.5;
   color: var(--ink-3);
+  opacity: 0.18;
   border-radius: 12px;
   cursor: pointer;
-  transition: color var(--dur-3) var(--ease), box-shadow var(--dur-3) var(--ease);
+  transition: color 600ms var(--ease), box-shadow 600ms var(--ease), background-color 600ms var(--ease), opacity 600ms var(--ease);
 }
-.fp:hover { color: var(--ink-2); }
-.fp.next { color: var(--ink-2); }
+.fp:hover { opacity: 0.5; color: var(--ink-2); }
+.fp.read { opacity: 0.25; color: var(--ink-3); }
+.fp.next { opacity: 0.35; color: var(--ink-2); }
+.fp.far { opacity: 0.12; }
 .fp.head { font-family: var(--font-display); font-weight: 700; }
 
-/* the one being read */
-.fp.now { color: var(--ink-2); box-shadow: inset 3px 0 0 var(--pa); }
-.fp.now.whole { color: var(--ink); background: var(--brand-soft); }   /* its words could not be shared out: lit whole */
+/* the one being read: fully visible, accented */
+.fp.now {
+  opacity: 1;
+  color: var(--ink);
+  box-shadow: inset 4px 0 0 var(--pa-ink);
+  background: color-mix(in srgb, var(--pa, var(--brand)) 6%, transparent);
+}
+.fp.now.whole {
+  opacity: 1;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--pa, var(--brand)) 14%, transparent);
+}
 
-/* its sentences: the ones already said bright, the one being said marked, the rest softer */
-.fs.read { color: var(--ink); }
+/* sentences: only the one being spoken is fully visible; everything else fades hard */
+.fs { color: var(--ink-3); opacity: 0.2; padding: 0; margin: 0; transition: color 180ms var(--ease), opacity 180ms var(--ease), background-color 180ms var(--ease), box-shadow 180ms var(--ease), padding 180ms var(--ease), margin 180ms var(--ease); }
+.fs.read { color: var(--ink-3); opacity: 0.25; }
 .fs.on {
   color: var(--ink);
+  opacity: 1;
   background: var(--hit);
-  padding: 0.04em 0.18em;
-  margin: 0 -0.18em;
-  border-radius: 0.3em;
-  box-decoration-break: clone;       /* a sentence over two lines is marked on both */
+  padding: 0.06em 0.22em;
+  margin: 0 -0.22em;
+  border-radius: 0.35em;
+  box-shadow: 0 0 24px 6px color-mix(in srgb, var(--pa, var(--brand)) 25%, transparent);
+  box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 
-/* ---- page mode: smaller text, all paragraphs readable, the spoken one highlighted ---- */
+/* ---- page mode: all readable, less dramatic fading ---- */
 
 .follow[data-mode='page'] .fo-text { max-width: 52rem; padding: 16vh 0 40vh; }
-
 .follow[data-mode='page'] .fp {
   font-size: var(--fs-lg);
   line-height: 1.65;
   color: var(--ink-2);
+  opacity: 0.5;
   margin-bottom: 0.7em;
 }
-.follow[data-mode='page'] .fp.read { color: var(--ink-2); }
-.follow[data-mode='page'] .fp.next { color: var(--ink-2); }
-.follow[data-mode='page'] .fp.far { color: var(--ink-2); }
-.follow[data-mode='page'] .fp:hover { color: var(--ink); }
-
+.follow[data-mode='page'] .fp.read { opacity: 0.55; color: var(--ink-2); }
+.follow[data-mode='page'] .fp.next { opacity: 0.6; color: var(--ink-2); }
+.follow[data-mode='page'] .fp.far { opacity: 0.4; color: var(--ink-2); }
+.follow[data-mode='page'] .fp:hover { opacity: 0.8; color: var(--ink); }
 .follow[data-mode='page'] .fp.now {
+  opacity: 1;
   color: var(--ink);
-  background: color-mix(in srgb, var(--pa, var(--brand)) 8%, transparent);
-  box-shadow: inset 3px 0 0 var(--pa);
+  background: color-mix(in srgb, var(--pa, var(--brand)) 10%, transparent);
+  box-shadow: inset 4px 0 0 var(--pa-ink);
 }
-.follow[data-mode='page'] .fp.now.whole { color: var(--ink); }
+.follow[data-mode='page'] .fp.now.whole { opacity: 1; color: var(--ink); }
 
-/* ---- the waveform scrubber (replaces the thin progress line) ---- */
+/* ---- waveform scrubber: glowing played bars, soft fade at the edge ---- */
 
 .fo-wave {
   position: relative;
@@ -113,39 +159,111 @@
 }
 .fo-wave:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .fo-wave svg { display: block; overflow: visible; }
-.fo-wave-rest rect { fill: color-mix(in srgb, var(--ink-3) 36%, transparent); }
-.fo-wave-played rect { fill: var(--pa-ink); }
-.fo-wave-played { clip-path: inset(0 calc((1 - var(--progress, 0)) * 100%) 0 0); }
+.fo-wave-rest rect { fill: color-mix(in srgb, var(--ink-3) 28%, transparent); }
+.fo-wave-played rect { fill: var(--pa-ink); filter: drop-shadow(0 0 6px var(--pa-glow)); }
+.fo-wave-played {
+  -webkit-mask-image: linear-gradient(to right,
+    black calc(var(--progress, 0) * 100% - 8px),
+    transparent calc(var(--progress, 0) * 100%)
+  );
+  mask-image: linear-gradient(to right,
+    black calc(var(--progress, 0) * 100% - 8px),
+    transparent calc(var(--progress, 0) * 100%)
+  );
+}
 
 .fo-wave-head {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 0;
+  bottom: 0;
   left: calc(var(--progress, 0) * 100%);
   width: 2px;
   margin-left: -1px;
-  background: var(--ink);
+  background: var(--pa-ink);
   border-radius: 2px;
   pointer-events: none;
+  box-shadow: 0 0 10px 3px var(--pa-glow);
   opacity: 0;
-  transition: opacity var(--dur-1) var(--ease);
+  transition: opacity var(--dur-2) var(--ease);
 }
 .fo-wave:hover .fo-wave-head,
 .fo-wave:focus-visible .fo-wave-head { opacity: 1; }
+[data-state='playing'] .fo-wave-head { opacity: 0.8; }
 
-/* the foot: where it is in the chapter, and the controls (the player's own buttons, see player.css) */
+/* ---- bottom bar: now-playing identity + frosted glass controls ---- */
+
 .fo-bottom {
   position: relative;
   padding: 10px var(--gutter) max(12px, env(safe-area-inset-bottom));
-  background: var(--surface);
+  background: var(--surface-glass);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
   border-top: 1px solid var(--line);
 }
+
+/* now-playing row: tile, title + book, time */
+.fo-now-playing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.fo-np-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--pa-ink);
+  background: var(--pa-soft);
+}
+.fo-np-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.fo-np-info b {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fo-np-info small {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pa-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fo-np-time {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.fo-np-sep { margin: 0 3px; opacity: 0.5; }
+
 .fo-line { position: absolute; left: 0; right: 0; top: -1px; height: 3px; background: var(--line); pointer-events: none; }
 .fo-line i { position: absolute; inset: 0; background: var(--pa-ink); transform-origin: left; transform: scaleX(var(--progress, 0)); }
 .fo-controls { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 28rem; margin: 0 auto; }
-.follow[data-state='playing'] .pplay { box-shadow: 0 0 0 6px color-mix(in srgb, var(--pa, var(--brand)) 20%, transparent), var(--shadow-1); }
+.fo-controls .pplay {
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-2) var(--ease), box-shadow var(--dur-3) var(--ease);
+}
+.follow[data-state='playing'] .fo-controls .pplay { animation: player-ring 2.5s ease-in-out infinite; }
+.fo-controls .pskip { transition: color var(--dur-2) var(--ease); }
+.fo-controls .pskip:hover { color: var(--ink); }
 
-/* shown once you have scrolled away */
+/* ---- "Back to now" pill ---- */
+
 .fo-pill {
   position: absolute;
   left: 0;
@@ -176,7 +294,9 @@
   max-height: 70vh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: var(--surface);
+  background: var(--surface-glass);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border-top: 1px solid var(--line);
   border-radius: 20px 20px 0 0;
   box-shadow: var(--shadow-2);
@@ -201,9 +321,10 @@
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--line);
+  transition: background-color var(--dur-2) var(--ease);
 }
 .fo-ch-item:last-child { border-bottom: 0; }
-.fo-ch-item.selected { background: var(--bg-2); }
+.fo-ch-item.selected { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .fo-ch-btn {
   display: flex;
   align-items: center;
@@ -218,9 +339,10 @@
   border-radius: 0;
   color: var(--ink);
   font-weight: 500;
+  transition: background-color var(--dur-2) var(--ease);
 }
-.fo-ch-btn:hover:not(:disabled) { background: var(--bg-2); border: 0; border-radius: 0; }
-.fo-ch-item.current .fo-ch-btn { background: color-mix(in srgb, var(--pa, var(--brand)) 10%, transparent); }
+.fo-ch-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 5%, transparent); border: 0; border-radius: 0; }
+.fo-ch-item.current .fo-ch-btn { background: color-mix(in srgb, var(--pa, var(--brand)) 12%, transparent); }
 .fo-ch-acts { display: flex; align-items: center; gap: 4px; flex: none; padding-right: var(--gutter); }
 .fo-ch-del { color: var(--ink-3); }
 .fo-ch-del:hover { color: var(--danger); }
@@ -248,8 +370,9 @@
   font-size: var(--fs-xs);
   font-weight: 700;
   color: var(--ink-2);
-  background: var(--bg-2);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   border-radius: 50%;
+  transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
 }
 .fo-ch-item.current .fo-ch-num { color: var(--bg); background: var(--pa-ink); }
 .fo-ch-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -273,8 +396,12 @@
 .fo-ch-eq i:nth-child(3) { animation-delay: calc(var(--dur-1) * -4); }
 @keyframes fo-eq { 0%, 100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
 
-/* phone: chapter list takes most of the screen */
+/* phone: tighter now-playing, bigger touch targets, less bottom fade so long sentences stay readable */
 @media (max-width: 639px) {
+  .fo-scroll { mask-image: linear-gradient(to bottom, transparent 0, var(--ink) 6%, var(--ink) 92%, transparent 100%); }
+  .fo-text { padding: 25vh 0 50vh; }
   .fo-chapters { max-height: 80vh; }
   .fo-ch-btn { min-height: 56px; }
+  .fo-np-tile { width: 32px; height: 32px; border-radius: 8px; }
+  .fo-now-playing { gap: 8px; }
 }

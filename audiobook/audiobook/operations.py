@@ -154,6 +154,29 @@ def pdf_file(path: str | Path) -> Path:
     return pdf.resolve()
 
 
+def _excluded_path(pdf: Path) -> Path:
+    return output_dir(pdf) / ".excluded.json"
+
+
+def get_excluded_chapters(pdf: Path) -> list[int]:
+    path = _excluded_path(pdf)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+            return sorted(set(int(n) for n in data if isinstance(n, int)))
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return []
+
+
+def set_excluded_chapters(pdf: Path, chapters: list[int]) -> list[int]:
+    path = _excluded_path(pdf)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cleaned = sorted(set(int(n) for n in chapters))
+    path.write_text(json.dumps(cleaned))
+    return cleaned
+
+
 def book_overview(pdf: Path) -> dict:
     """What a book will be: its chapters, how long each is, and how much was left out. Planning is
     instant once Docling has analysed the PDF; before that this says so instead of waiting minutes."""
@@ -165,6 +188,7 @@ def book_overview(pdf: Path) -> dict:
                 "hint": "Docling has not read this PDF yet. start_analysis does that in the "
                         "background (about 2-4 seconds a page, cached afterwards)."}
     plan = plan_book(pdf)
+    excluded = set(get_excluded_chapters(pdf))
     total = sum(c.spoken_chars for c in plan.chapters)
     skipped = Counter(s.reason for c in plan.chapters for s in c.skipped)
     files = _audio_files(output_dir(pdf))
@@ -178,6 +202,7 @@ def book_overview(pdf: Path) -> dict:
 
     return {
         "pdf": str(pdf), "analysed": True, "title": plan.title, "author": plan.author,
+        "excluded": sorted(excluded),
         "chapters": [
             # `stem`: how this chapter's audio is named, before the speed (names.chapter_stem). Audio Shelby now
             # keeps instead of this folder is matched to the chapter by it, as `audio` here is.

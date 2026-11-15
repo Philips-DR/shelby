@@ -69,7 +69,7 @@ function Menu({ label, value, children, align = 'left' }: {
 
 // ---- the player ---------------------------------------------------------------------------------------------
 
-export function AudioPlayer({ onClose }: { onClose?: () => void }) {
+export function AudioPlayer({ onClose, onTap }: { onClose?: () => void; onTap?: () => void }) {
   const { track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave, continues, notice } = usePlayer()
   const { time, duration, sleepLeft } = usePlayerClock()
   const act = usePlayerActions()
@@ -78,6 +78,7 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
   const [remaining, setRemaining] = useState(false)
   const [hover, setHover] = useState<number | null>(null) // 0..1 along the bar under the pointer
   const dragging = useRef(false)
+  const sought = useRef(false)
 
   // Keep the bar current, and tell the docked player to step aside while this one is actually in view. It
   // counts as in view from the start (so the dock never flashes up as this one opens), and stops counting if
@@ -102,6 +103,7 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
   }
   const onDown = (e: PointerEvent) => {
     dragging.current = true
+    sought.current = true
     act.scrub(true)
     e.currentTarget.setPointerCapture(e.pointerId)
     act.seek(fraction(e) * duration)
@@ -152,14 +154,21 @@ export function AudioPlayer({ onClose }: { onClose?: () => void }) {
   // A chapter of a book has chapters either side; a file with no book has neither, and no buttons to go there.
   const steps = Boolean(track.next || track.previous)
 
+  const cardClick = onTap ? (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, input, .pmenu')) return
+    if (sought.current) { sought.current = false; return }
+    onTap()
+  } : undefined
+
   return (
     <div
-      className="player"
+      className={`player ${onTap ? 'player-tappable' : ''}`}
       ref={root}
       role="group"
       aria-label={`Audio player: ${track.title}`}
       data-state={state}
       style={{ '--pa': toolColor('audiobook') } as CSSProperties}
+      onClick={cardClick}
     >
       {(resumed !== null || onClose) && (
         <div className="player-top">

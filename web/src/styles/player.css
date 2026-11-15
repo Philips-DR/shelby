@@ -19,6 +19,7 @@
   gap: 8px;
   margin-top: 12px;
   padding: 14px 16px 12px;
+  overflow: hidden;
   background: linear-gradient(to bottom, color-mix(in srgb, var(--pa, var(--brand)) 10%, var(--bg-2)) 0%, var(--bg-2) 70px);
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -31,7 +32,7 @@
 
 /* ---- track identity: book and chapter title ---- */
 
-.player-id { display: flex; flex-direction: column; gap: 2px; }
+.player-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .player-id-book {
   font-size: var(--fs-xs);
   font-weight: 650;
@@ -52,6 +53,8 @@
   white-space: nowrap;
   animation: fade-in var(--dur-2) var(--ease) both;
 }
+.player-tappable { cursor: pointer; transition: border-color var(--dur-2) var(--ease), background var(--dur-2) var(--ease); }
+.player-tappable:hover { border-color: var(--pa-ink); }
 
 /* a text-like button: the length, "Start over" */
 button.plink {
