@@ -8,9 +8,12 @@ with Whisper (2026-09-30). Before → what the voice said:
   "turned into a . . . and I stopped"    → "turned into a thin" — rest lost
   "Parts II & III"                       → "hearts and the toughest"
 After these rules all five were read correctly. Don't add rules that haven't been checked this way.
+Bible references have their own module, `scripture.py`, checked the same way (2026-11-19).
 """
 
 import re
+
+from . import scripture
 
 ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve",
         "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"]
@@ -115,7 +118,7 @@ ROMAN = r"[IVXL]+"
 NUMBERED = re.compile(
     rf"\b(Parts?|Chapters?|Books?|Sections?|Volumes?|Acts?)\s+({ROMAN}(?:\s*(?:&|and|,|-|–|to)\s*{ROMAN})*)\b"
 )
-# "Ephesians 1:18", "1 John 3:16-18"
+# Any capitalised word before chapter:verse, for what scripture.py's table of books does not know ("Ephesians 1:18")
 SCRIPTURE = re.compile(r"\b((?:[1-3] )?[A-Z][a-z]+) (\d{1,3}):(\d{1,3})(?:[-–](\d{1,3}))?\b")
 DIGIT_COLON = re.compile(r"(\d):(\d)")
 # Two or more all-caps words with at least one of 4+ letters ("THE JUDGMENT SEAT OF CHRIST"), or a
@@ -158,6 +161,12 @@ def _caps_run(m: re.Match) -> str:
 def for_speech(text: str) -> str:
     text = text.replace("_", " ")  # first_hop_retrieve → first hop retrieve; before the caps rules
     text = NUMBERED.sub(_numbered, text)
+    text = scripture.references(text)  # every Bible reference, whole (scripture.py); before the numbers are words
+    text = scripture.verse_marks(text)
+    text = scripture.chapter_lists(text)
+    text = scripture.verse_lists(text)
+    text = scripture.numbered_books(text)
+    text = scripture.version_names(text)
     text = SCRIPTURE.sub(_scripture, text)
     text = DIGIT_COLON.sub(r"\1 \2", text)  # any other n:n (times, ratios): a colon cuts the sentence off
     text = ORDINAL_NUM.sub(lambda m: ordinal_to_words(int(m.group(1))), text)

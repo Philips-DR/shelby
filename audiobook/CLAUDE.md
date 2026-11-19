@@ -153,6 +153,64 @@ silence, then the title, then the usual `TITLE_PAUSE`. A chapter with no label (
 - `chapter_texts` (what the progress count and the estimate are built from) uses the same pieces, so the count is exactly what the
   voice is asked for; a test says so.
 
+## Bible references (`scripture.py`, 2026-11-19)
+
+The old rule handled only "John 3:16". Whisper on the audio already rendered from the user's six Christian books heard
+"1 John 1:9" as "John 1, verse 9", "2 Samuel 24:14b" as "To Samuel 2440", "Gen. 1:31" as "Cgen 131", "Ps. 111:7" as "Pez
+111-1", "1 Cor. 3:16; 6:19" as "One Core 316-619", "Rom. 6:23a" as "rome six two threea", "KJV" as "K J D".
+`scripture.references` now reads a reference whole, from a table of the 66 books (full names and the short forms books use,
+with or without the full stop, and in capitals for a heading). The user chose (2026-11-19): a half-verse says its letter
+("verse sixteen b"), a version is said in full ("King James Version", also standing alone), a psalm is "Psalm twenty-three,
+verse four" and every other book "John chapter three, verse sixteen". `1 John` is "First John".
+
+- **Forms covered:** ranges, lists ("24, 26", "1-3,8", "1:1-2,4;7-12;23-29"), chains ("Ps. 31:5; 45:4" → "Psalm
+  thirty-one, verse five; and Psalm forty-five, verse four"), a range into the next chapter ("8:21-9:1"), a version after
+  it ("(Rom. 3:23 NKJV)"), "v. 39" / "vv. 37-38" / "(vs. 3)", a book's own "verses 29-32" and "verse 17,18", "1 Corinthians"
+  with no chapter, and **a chapter with no verse after an abbreviation** ("Gen. 22", "Exod. 29-30;39-40", "1 Sam. 13, 15,
+  and 16" → the whole name: "Genesis twenty-two", "Exodus chapters twenty-nine to thirty and thirty-nine to forty").
+  Only an abbreviation with its full stop gets that last treatment: a name written out ("Genesis 22") was always read well. `speech.for_speech` runs it where the old pattern was; the old pattern stays behind it as a fallback for a
+  capitalised word the table does not know. The digits are left for the number rules, as for every other number.
+- **A name is a book only with a chapter and verse after it.** Short forms that are also English words (Is, Am, Re, Co, Ho...)
+  are not in the table; `I John 3:16` is First John but "and I John saw" is left alone; a bare number after a verse list is
+  a verse only when the reference plainly ends there ("Romans 1:24, 26)" yes, "Romans 1:24, 26 people came" no), except a
+  list written with no space ("19,20"). After a semicolon only a *range* continues the verses ("Gen. 1:1-8; 14-18"): a lone
+  number there may be a chapter.
+- **A lost dash is put back** (`_LOST_DASH`, `_LOST_DASH_LETTER`): "Acts 9:1012" is "9:10-12", "Mark 7:14b23" is "14b-23". The PDFs lose the dash of 9 references in these
+  books and the dash step (`dashes.py`) restores some and misses others; no verse has four digits, so two ascending
+  two-digit verses right after book, chapter and colon can only be a range. Four digits that are not ascending are left. A
+  stray hyphen after the colon ("Ps. 91:-16") is skipped.
+- **Known gaps:** "3 John" with no verse still says "three John" (it cannot be told from "Chapter 3 John the Baptist");
+  `Is 53:5`-style short forms of Isaiah are not read as a book; the square brackets of `["glory" NKJV]` are stripped by the
+  older symbol rule, so the alternative reading is no longer set apart; **a reference the PDF splits across a paragraph break**
+  ("(Acts" ending one paragraph, "10:46a)." starting the next) cannot be read (one case, in *Rediscovering Kingdom Worship*);
+  **Strong's numbers** ("H6754", 18 in that book) are not touched: the voice says the digits one at a time, the user has not
+  said how they should be read.
+- **Checked the way speech.py asks (abigail's 8-bit voice, then Whisper `distil-large-v3`):** 37 real sentences, picked by
+  form from the books, 1146 of 1168 words matched (98.1%) with "second"/"2" counted alike. Every difference was a word
+  outside the reference ("lyres" → "liars", "Agur" → "Agar", "precepts" → "presepts") except two: the half-verse letters
+  ("verse 23A", "23B", "13 b" were heard as letters; "four a" was heard "4 8" once and an "a" was dropped once, so **the letter
+  `a` is the weak one: it can sound like the word "a"**), and "Psalm one hundred forty-eight" lost in one long piece
+  (Pocket TTS's own "may skip words" limit: the same sentence alone was right 3 times of 3, and the three-reference chain
+  right). Not listened to by ear by whoever wrote this: the user's ear is the last check.
+- **Over the books' real text:** 7,178 paragraphs, 685 changed; every changed hunk was a reference, a version name or a verse
+  list. 1,454 references, 845 said differently. The real plans (with the dash step) leave no verse said as a thousand.
+- **What the first render of a real book found that the checks above had not (2026-11-19, *Rediscovering Kingdom Worship*):**
+  the chapter-only abbreviations, "vs.", the dash lost after a letter and the stray hyphen, about 50 places. The checks had run
+  on raw Docling text and on a leftover sweep whose output was cut at 40 lines. **Audit the text the render writes beside
+  each MP3 (`<stem>.json`, key `text`), in full, for a table abbreviation still carrying its full stop, "one/two/three" before
+  a book, `vs.`, a digit next to a letter, and every token that still holds a digit.** After the fix that audit finds only the
+  split reference above.
+- **A finished book keeps the old speech until it is rendered again.** The cache is keyed on text, so only changed pieces are
+  spoken (counts before the chapter-only fix, which adds a few): 78 (Dreams and Visions), 41 (Sharpen Your Discernment), 95
+  (Purpose and Power of Woman), 205 (Overcoming Addictive Behavior), 212 (When Godly People Do Ungodly Things), 242
+  (Rediscovering Kingdom Worship). **Re-rendered 2026-11-19: only *Rediscovering Kingdom Worship*** (45 chapters, 5.65 h, voice
+  abigail, 0.95x as on 2026-11-16): the first pass made 242 pieces, the second 18 more. It was run on the host, not through the
+  app, because the container still held the old code: `PYTHONPATH=<audiobook> .venv/bin/python -m audiobook render <pdf>
+  --voice abigail --speed 0.95` from a folder whose `.cache`, `output`, `voices` and `voice` are links to `data/audiobook/`
+  (same cache, so the voice-file hash `c0eac2e8368cbfe0` must match, or the whole book is spoken again). The new MP3s are in
+  `data/audiobook/output/<book>/`; the earlier ones had been filed by Shelby and released from there. The others are not
+  re-rendered.
+
 ## Speaking a chat reply (`speaking.py`, the `speak` tool, 2026-11-06)
 
 Shelby's chat reads replies aloud through `speak(text, voice)`: up to 600 characters in (the page sends a sentence
@@ -234,6 +292,7 @@ listening to the same passage from both models ("i think they are the same").
   `operations` finds it again).
 - `audiobook/speech.py` — pure rewrites for what the voice misreads, each verified by synthesis +
   Whisper (see its docstring); per-book corrections (`book.corrections.txt` next to the PDF).
+- `audiobook/scripture.py` — pure: Bible references read whole, from a table of the 66 books (see "Bible references").
 - `audiobook/preview.py` — pure `BookPlan → preview.md` (chapter table, exact text, skipped summary).
 - `audiobook/operations.py` — `plan_book`, `preview_book`, `render_pdf`, and what the MCP door needs on
   top: `book_overview`, `chapter_text`, corrections, `list_audiobooks`, `start_*`, `job_status`. What

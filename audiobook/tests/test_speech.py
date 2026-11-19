@@ -69,7 +69,7 @@ def test_ordinal_to_words(n, expected):
         ("as Paul prayed in Ephesians 1:18, the more",
          "as Paul prayed in Ephesians chapter one, verse eighteen, the more"),
         ("read 1 John 3:16-18 aloud",
-         "read one John chapter three, verses sixteen to eighteen aloud"),
+         "read First John chapter three, verses sixteen to eighteen aloud"),
         ("at 3:30 we left", "at three thirty we left"),
         ('I read "THE JUDGMENT SEAT OF CHRIST."', 'I read "The Judgment Seat of Christ."'),
         ("turned into a . . . and I stopped", "turned into a... and I stopped"),
@@ -110,7 +110,7 @@ def test_for_speech(text, expected):
         # Comma numbers
         ("1,000 people gathered", "one thousand people gathered"),
         # Bible refs: digits in the expansion are also converted
-        ("Psalm 119:15 nkjv", "Psalm chapter one hundred nineteen, verse fifteen nkjv"),
+        ("Psalm 119:15 nkjv", "Psalm one hundred nineteen, verse fifteen, New King James Version"),
         # Decimals read as "N point digit digit..."
         ("accuracy of 78.78 points", "accuracy of seventy-eight point seven eight points"),
         ("scored 67.00%", "scored sixty-seven point zero zero%"),
