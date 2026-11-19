@@ -168,7 +168,10 @@ verse four" and every other book "John chapter three, verse sixteen". `1 John` i
   it ("(Rom. 3:23 NKJV)"), "v. 39" / "vv. 37-38" / "(vs. 3)", a book's own "verses 29-32" and "verse 17,18", "1 Corinthians"
   with no chapter, and **a chapter with no verse after an abbreviation** ("Gen. 22", "Exod. 29-30;39-40", "1 Sam. 13, 15,
   and 16" → the whole name: "Genesis twenty-two", "Exodus chapters twenty-nine to thirty and thirty-nine to forty").
-  Only an abbreviation with its full stop gets that last treatment: a name written out ("Genesis 22") was always read well. `speech.for_speech` runs it where the old pattern was; the old pattern stays behind it as a fallback for a
+  Only an abbreviation with its full stop gets that last treatment: a name written out ("Genesis 22") was always read well.
+  Also a version in brackets after a quotation ("(AMP)" → "(Amplified Bible)": 9 in *When Godly People Do Ungodly Things*; these
+  letters are a version in these books, never the word) and "the Book of 1 John" (a number and John straight after Book, Epistle
+  or Letter of is the letter; a bare "1 John" elsewhere is left as a count). `speech.for_speech` runs it where the old pattern was; the old pattern stays behind it as a fallback for a
   capitalised word the table does not know. The digits are left for the number rules, as for every other number.
 - **A name is a book only with a chapter and verse after it.** Short forms that are also English words (Is, Am, Re, Co, Ho...)
   are not in the table; `I John 3:16` is First John but "and I John saw" is left alone; a bare number after a verse list is
@@ -209,7 +212,18 @@ verse four" and every other book "John chapter three, verse sixteen". `1 John` i
   --voice abigail --speed 0.95` from a folder whose `.cache`, `output`, `voices` and `voice` are links to `data/audiobook/`
   (same cache, so the voice-file hash `c0eac2e8368cbfe0` must match, or the whole book is spoken again). The new MP3s are in
   `data/audiobook/output/<book>/`; the earlier ones had been filed by Shelby and released from there. The others are not
-  re-rendered.
+  re-rendered then. **Also re-rendered 2026-11-19: *When Godly People Do Ungodly Things*** (84 chapters, 7.99 h): 216 pieces in
+  the first pass, about ten more after the bracketed-version and Book-of-1-John rules; the spoken text of all 84 chapters was
+  audited in full afterwards (nothing old left but a web address and one scan oddity).
+- **The other four books cost far more than the changed pieces suggest, and are not re-rendered.** `ChunkRenderer.choose` reuses
+  a chapter's full-model audio only when *every* piece matches today's text; otherwise the whole chapter is spoken again in
+  8-bit. Dreams and Visions (1, 4-19), Sharpen Your Discernment (1-36), Purpose and Power of Woman (1-2) and Overcoming Addictive
+  Behavior (1-11) were rendered before the dash and quote text fixes, so every chapter is re-spoken: 1,003, 1,562, 1,319 and 942
+  pieces, 3.9, 5.3, 6.4 and 4.0 hours of audio, about 1.8, 2.4, 2.9 and 1.8 hours to render (9.4 h in all), nearly all of it
+  needed even without this change. A count of changed pieces per piece (78, 41, 95, 205) is wrong for them. Count with the
+  renderer's own rule (`chapter_texts`, then whole-full or missing in the `-int8` folder) before promising a time.
+  The chapters with earlier audio are found from the old render jobs' `outputs` file names (`names.chapter_stem`), since
+  chapter numbers and counts have moved since. Held for the user's say-so.
 
 ## Speaking a chat reply (`speaking.py`, the `speak` tool, 2026-11-06)
 

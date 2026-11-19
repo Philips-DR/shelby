@@ -93,6 +93,13 @@ from audiobook.speech import for_speech
         ("(See verses 29-32.)", "(See verses twenty-nine to thirty-two.)"),
         ("in verse 17,18 he says", "in verses seventeen and eighteen he says"),
         ("verses 4-5,8", "verses four to five and eight"),
+        # A version in brackets after a quotation, and a letter named by its book.
+        ('"... into sin" (AMP). Not only', '"... into sin" (Amplified Bible). Not only'),
+        ("(TPT) and (NIV)", "(The Passion Translation) and (New International Version)"),
+        ("the entire Book of 1 John is written", "the entire Book of First John is written"),
+        ("in the epistle of 2 John", "in the epistle of Second John"),
+        ("I have 1 John to read", "I have one John to read"),  # a count of Johns is left as a count
+        ("an amp (and a net)", "an amp (and a net)"),
         # After a quotation.
         ('(v. 39)', '(verse thirty-nine)'),
         ('(vv. 37-38)', '(verses thirty-seven to thirty-eight)'),

@@ -143,6 +143,10 @@ _VERSE_ABBREVIATION = re.compile(
 _VERSE_LIST = re.compile(
     r"\bverses?\s+(?P<first>\d{1,3}[a-c]?)(?P<rest>(?:\s?[-–—]\s?\d{1,3}[a-c]?|,\d{1,3}[a-c]?)+)(?![A-Za-z\d])"
 )
+# "(AMP)" after a quotation: in brackets, these letters are a version in these books, never the word.
+_BRACKETED_VERSION = re.compile(r"\((" + "|".join(sorted(VERSIONS, key=len, reverse=True)) + r")\)")
+# "the Book of 1 John": a number and John after these words can only be the letter.
+_BOOK_OF_JOHN = re.compile(r"\b(?P<of>(?:[Bb]ook|[Ee]pistles?|[Ll]etters?) of )(?P<n>[1-3]|1st|2nd|3rd) John\b")
 _UNAMBIGUOUS_NUMBERED = re.compile(
     r"(?<![\w:./-])(?P<n>[1-3]|1st|2nd|3rd)[ \u00a0]?(?P<b>Corinthians|Thessalonians|Timothy|Peter|Samuel|Kings|Chronicles)\b"
 )
@@ -336,10 +340,13 @@ def verse_lists(text: str) -> str:
 
 
 def numbered_books(text: str) -> str:
-    """"1 Corinthians" with no chapter after it: "First Corinthians" (the voice reads the digit as a count)."""
+    """"1 Corinthians" with no chapter after it: "First Corinthians" (the voice reads the digit as a count). Also "the
+    Book of 1 John"."""
+    text = _BOOK_OF_JOHN.sub(lambda m: f"{m['of']}{_ORDINAL[m['n']]} John", text)
     return _UNAMBIGUOUS_NUMBERED.sub(lambda m: f"{_ORDINAL[m['n']]} {m['b']}", text)
 
 
 def version_names(text: str) -> str:
     """"NKJV", "KJV", "NIV"... standing alone: the version's name (read as letters, KJV came out "K J D")."""
-    return _ANYWHERE_TAG.sub(lambda m: VERSIONS[m.group(1)], text)
+    text = _ANYWHERE_TAG.sub(lambda m: VERSIONS[m.group(1)], text)
+    return _BRACKETED_VERSION.sub(lambda m: f"({VERSIONS[m.group(1)]})", text)
