@@ -27,6 +27,7 @@ import { onRequest, takeRequest } from '../player/showing'
 import { adjacent } from '../player/queue'
 import { renderLabel, unrendered } from './audiobookText'
 import { audioKey, goesWithBook, withKept, withKeptBooks, withKeptSamples, type AudioEntry } from './audiobookKept'
+import { seeing, shown, type JobView } from './audiobookJobs'
 import { activeSegment, fetchTiming, spokenSegments, type SegmentTiming } from './audiobookTiming'
 import { unitAt, unitsFor, wordsOf } from './audiobookSentences'
 import { AudioPlayer } from '../ui/AudioPlayer'
@@ -72,6 +73,9 @@ interface BookJob {
   /** The book as a person names it; `target` is its file. Absent on jobs from before 2026-10-30. */
   title?: string | null
 }
+
+/** A voice sample's name to the player: there is one sample per voice, whichever copy of it is playing. */
+const sampleKey = (name: string) => `sample:${name}`
 
 const fetchAudio = (a: AudioEntry) => (a.id ? fetchStored(a.id) : fetchMedia(a.path ?? ''))
 
@@ -245,7 +249,7 @@ function chapterTrack(pdf: string, chapters: readonly Chapter[], chapter: Chapte
 
 /** Play a file a tool made. Fetched with the token and handed to the one player that lives above the pages
  *  (player/engine.tsx), so what you start here keeps playing when you leave this page. */
-function usePlay(audio: AudioEntry | undefined, title: string, asTrack?: (blob: Blob) => Track) {
+function usePlay(audio: AudioEntry | undefined, title: string, asTrack?: (blob: Blob) => Track, trackKey?: string) {
   const { track, playing: audible } = usePlayer()
   const { open, close } = usePlayerActions()
   const [busy, setBusy] = useState(false)
@@ -253,7 +257,7 @@ function usePlay(audio: AudioEntry | undefined, title: string, asTrack?: (blob: 
   const here = useRef(true)
   useEffect(() => { here.current = true; return () => { here.current = false } }, [])
 
-  const key = audio ? audioKey(audio) : ''
+  const key = trackKey ?? (audio ? audioKey(audio) : '')
   const current = !!key && track?.key === key
   const play = async () => {
     if (!audio) return
@@ -272,9 +276,10 @@ function usePlay(audio: AudioEntry | undefined, title: string, asTrack?: (blob: 
   return { current, playing: current && audible, busy, error, play, close }
 }
 
-/** Play or download a file a tool made, kept or still at its bench. */
-function AudioFile({ audio, label }: { audio: AudioEntry; label?: string }) {
-  const { current, playing, busy, error: playError, play, close } = usePlay(audio, label ?? audio.name)
+/** Play or download a file a tool made, kept or still at its bench. `trackKey` names it to the player when its own key
+ *  would change under it: a sample is on the bench when it is made, then Shelby files it under an id, a moment later. */
+function AudioFile({ audio, label, trackKey }: { audio: AudioEntry; label?: string; trackKey?: string }) {
+  const { current, playing, busy, error: playError, play, close } = usePlay(audio, label ?? audio.name, undefined, trackKey)
   const [error, setError] = useState('')
   const size = audio.megabytes || null
 
@@ -416,7 +421,7 @@ function JobCard({ job, name, samples, reload, openBook }: {
         </>
       )}
       {job.state === 'done' && job.kind === 'sample' && job.outputs.map((o) => (
-        <AudioFile key={o} audio={samples.find((s) => s.name === fileName(o)) ?? { name: fileName(o), path: o, megabytes: 0, modified: 0 }} />
+        <AudioFile key={o} trackKey={sampleKey(fileName(o))} audio={samples.find((s) => s.name === fileName(o)) ?? { name: fileName(o), path: o, megabytes: 0, modified: 0 }} />
       ))}
       {job.state === 'done' && (job.kind === 'render' || job.kind === 'analyse') && (
         <p className="ab-done muted">
@@ -946,7 +951,7 @@ function ChapterRow({ pdf, version, chapter, chapters, chosen, longest, book, re
   )
 }
 
-function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, reloadJob, onBack, onDelete }: {
+function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, sampleJob, reloadJob, onBack, onDelete }: {
   pdf: string
   /** What Shelby keeps of this tool's work: the chapters' audio once a render has handed it over. */
   kept: Kept[]
@@ -959,6 +964,8 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
   samples: AudioEntry[]
   voicesLoaded: boolean
   job: BookJob | null
+  /** The voice sample job to show in the Voices card: running, or finished and watched. */
+  sampleJob: BookJob | null
   reloadJob: () => Promise<void>
   onBack: () => void
   /** Ask to delete this book; the page knows its upload and its audio. */
@@ -1342,7 +1349,7 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
           </div>
 
           {/* Under the chapters, the width of the page: the voices are chosen for a book, so they live with it. */}
-          <Voices voices={voices} samples={samples} loaded={voicesLoaded} running={running} reloadJob={reloadJob} />
+          <Voices voices={voices} samples={samples} loaded={voicesLoaded} running={running} sampleJob={sampleJob} reloadJob={reloadJob} />
 
           <div className="grid-2 ab-pair">
             {skipped.length > 0 && (
@@ -1396,12 +1403,15 @@ function Book({ pdf, readNow, reveal, voices, samples, kept, voicesLoaded, job, 
 
 // ---------------------------------------------------------------------------
 
-function Voices({ voices, samples, loaded, running, reloadJob }: {
+function Voices({ voices, samples, loaded, running, sampleJob, reloadJob }: {
   voices: Voice[]
-  /** What "Hear a sample" made, newest first. */
+  /** What "Hear a sample" made, by voice. */
   samples: AudioEntry[]
   loaded: boolean
+  /** Any job is running; only one runs at a time. */
   running: boolean
+  /** The sample being made, or just made and watched: its card is shown here, where its button is. */
+  sampleJob: BookJob | null
   reloadJob: () => Promise<void>
 }) {
   const [name, setName] = useState('')
@@ -1414,6 +1424,16 @@ function Voices({ voices, samples, loaded, running, reloadJob }: {
   // Folded by default, so the books come first; opened or folded, it stays so in this browser.
   const [shown, setShown] = useState(() => store.read(VOICES_OPEN) === '1')
   const show = (open: boolean) => { setShown(open); store.write(VOICES_OPEN, open ? '1' : '0') }
+  // The list of samples opens by itself when a new one has been made, so it is not left in a closed list nobody opens.
+  const [samplesOpen, setSamplesOpen] = useState(false)
+  const sampling = sampleJob?.state === 'running'
+  const sampleDone = sampleJob?.state === 'done' ? sampleJob.id : ''
+  useEffect(() => { if (sampleDone) setSamplesOpen(true) }, [sampleDone])
+  // A sample's card appears between the voices and the built-in list; if a button pressed far from it left it off
+  // screen, bring it into view (only as far as it takes: nothing moves if it is already in sight).
+  const jobCard = useRef<HTMLDivElement>(null)
+  const jobId = sampleJob?.id
+  useEffect(() => { if (jobId) jobCard.current?.scrollIntoView({ block: 'nearest' }) }, [jobId])
 
   const upload = async ([file]: File[]) => {
     if (!file) return
@@ -1494,19 +1514,38 @@ function Voices({ voices, samples, loaded, running, reloadJob }: {
           ))}
         </ul>
 
+        {sampleJob && (
+          <div ref={jobCard} className="ab-sample-job">
+            <JobCard job={sampleJob} samples={samples} reload={reloadJob} />
+          </div>
+        )}
+        {running && !sampling && <p className="hint ab-sample-wait">A sample can be made when the job that is running has finished.</p>}
+
         {presets.length > 0 && (
           <details className="ab-presets">
             <summary>Built-in voices ({presets.length})</summary>
-            <p className="hint">Built-in voices work by name too:</p>
-            <ul className="ab-chips">{presets.map((v) => <li key={v.name}><span className="badge">{v.name}</span></li>)}</ul>
+            <p className="hint">Press a name to hear that voice read a sample. It takes about half a minute.</p>
+            <ul className="ab-chips">
+              {presets.map((v) => (
+                <li key={v.name}>
+                  <button
+                    className="ab-chip" disabled={busy || running} aria-label={`Hear a sample of ${v.name}`}
+                    aria-busy={sampling && sampleJob?.target === v.name}
+                    onClick={() => void start('audiobook__start_voice_sample', { voice: v.name })}
+                  >
+                    <IconPlay size={14} aria-hidden />{v.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </details>
         )}
 
         {samples.length > 0 && (
-          <details className="ab-presets">
+          <details className="ab-presets" open={samplesOpen} onToggle={(e) => setSamplesOpen(e.currentTarget.open)}>
             <summary>Samples ({samples.length})</summary>
             <div className="ab-files">
-              {samples.map((f) => <AudioFile key={`${audioKey(f)}:${f.modified}`} audio={f} />)}
+              {samples.map((f) => <AudioFile key={`${audioKey(f)}:${f.modified}`} trackKey={sampleKey(f.name)} audio={f} />)}
             </div>
           </details>
         )}
@@ -1608,12 +1647,14 @@ export function Audiobooks() {
   const finished = usePoll(() => call<{ audiobooks: AudioBook[] }>('audiobook__list_audiobooks'), 30000)
   const keptPoll = usePoll(() => getKept('audiobook'), 30000)
   const job = status.data?.job ?? null
-  const [hiddenJobId, setHiddenJobId] = useState('')
-  useEffect(() => {
-    if (job?.state === 'done') setHiddenJobId(job.id)
-    else if (job?.state === 'running') setHiddenJobId('')
-  }, [job?.id, job?.state])
-  const visibleJob = job && job.id !== hiddenJobId ? job : null
+  // A finished job's card is hidden at once, except a voice sample this page watched run: its card is where it is played.
+  const [jobView, setJobView] = useState<JobView>({ hiddenId: '', watchedSampleId: '' })
+  useEffect(() => { setJobView((view) => seeing(job, view)) }, [job?.id, job?.kind, job?.state])
+  const visibleJob = shown(job, jobView)
+  // With a book open, a sample's card is in that book's Voices card, beside the button that made it, not at the top of
+  // a page that may be scrolled away from it. With no book open there is no Voices card, so the top shows it.
+  const sampleJob = book && visibleJob?.kind === 'sample' ? visibleJob : null
+  const topJob = sampleJob ? null : visibleJob
 
   // Chapters finish one by one during a render, so the audio follows the job; and the server says when it has taken
   // something in, which is a moment after the tool made it.
@@ -1678,7 +1719,7 @@ export function Audiobooks() {
 
   return (
     <div className="panel ab-page" style={style({ '--ab': toolColor('audiobook') })}>
-      <JobCard job={visibleJob} name={visibleJob ? titleFor(visibleJob.target) : undefined} samples={samples} reload={status.reload} openBook={jobBook ? () => open(jobBook) : undefined} />
+      <JobCard job={topJob} name={topJob ? titleFor(topJob.target) : undefined} samples={samples} reload={status.reload} openBook={jobBook ? () => open(jobBook) : undefined} />
       {book ? (
         <Book
           key={book}
@@ -1690,6 +1731,7 @@ export function Audiobooks() {
           kept={kept}
           voicesLoaded={voiceList.data !== null}
           job={job}
+          sampleJob={sampleJob}
           reloadJob={status.reload}
           onBack={close}
           onDelete={(title) => setDeleting(doomedFor(stem(book), title))}

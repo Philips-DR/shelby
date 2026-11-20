@@ -73,6 +73,17 @@ describe('the tool’s copy and the kept copy, while both exist', () => {
       [kept('sample', 'abigail-test.mp3', { voice: 'abigail' })])
     expect(samples.map((s) => [s.name, s.id ?? s.path])).toEqual([['abigail-test.mp3', 'f-abigail-test.mp3'], ['tina-test.mp3', '/out/voices/tina-test.mp3']])
   })
+
+  it('a sample made again is the tool’s new file until Shelby has filed it, then the kept one', () => {
+    const fresh: AudioEntry = { name: 'tina-test.mp3', path: '/out/voices/tina-test.mp3', megabytes: 0.1, modified: 500 }
+    const old = kept('sample', 'tina-test.mp3', { voice: 'tina' }, 100)
+    // the new file is on the bench, the old copy is still the kept one: play the new one
+    expect(withKeptSamples([fresh], [old]).map((s) => s.id ?? s.path)).toEqual(['/out/voices/tina-test.mp3'])
+    // Shelby has filed it (the record is updated after the file was made) and the bench still has its copy: the kept one
+    expect(withKeptSamples([fresh], [{ ...old, updated: 520 }]).map((s) => s.id ?? s.path)).toEqual(['f-tina-test.mp3'])
+    // the bench has let go
+    expect(withKeptSamples([], [{ ...old, updated: 520 }]).map((s) => s.id ?? s.path)).toEqual(['f-tina-test.mp3'])
+  })
 })
 
 describe('a book is named as the tool names it, not by an old chapter’s tag', () => {

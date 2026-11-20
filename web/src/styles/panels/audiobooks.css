@@ -224,6 +224,17 @@
 .ab-presets > summary, .ab-add > summary { min-height: 44px; }
 .ab-presets .hint { margin: 2px 0 8px; }
 
+/* a built-in voice: a name you press to hear it (a pill, at least 40px tall to touch) */
+.ab-chip { min-height: 40px; padding: 0 14px 0 12px; border-radius: var(--r-pill); gap: 6px; }
+.ab-chip svg { color: var(--brand); }
+.ab-chip[aria-busy='true'] { color: var(--brand); background: var(--brand-soft); border-color: var(--brand-line); }
+
+/* the sample being made, or just made, inside the Voices card: the card is a card inside a card, so it sits flat */
+.ab-sample-job { margin-top: 12px; scroll-margin-block: 12px; }
+.ab-sample-job .ab-job { background: var(--surface-2); box-shadow: none; }
+.ab-sample-job .ab-job.job-running { box-shadow: 0 0 0 3px var(--glow); }
+.ab-sample-wait { margin: 12px 0 0; }
+
 .ab-steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
 .ab-steps > li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; }
 .ab-step-n { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--ink-2); background: var(--bg-2); font-size: var(--fs-xs); font-weight: 700; transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }

@@ -82,7 +82,15 @@ export function withKeptBooks(own: BookAudio[], kept: Kept[]): BookAudio[] {
 
 /** Voice samples: the tool's own, with the ones Shelby keeps. */
 export function withKeptSamples(own: AudioEntry[], kept: Kept[]): AudioEntry[] {
-  return merged(own, kept.filter((r) => r.kind === 'sample').map(keptEntry).filter(isAudioEntry)).sort(byName)
+  // A sample is made again under the same name, and Shelby files the new one a moment after the tool makes it. In
+  // that moment the old kept copy is the older one, so the newer of the two stands (as `merged` does for a chapter,
+  // the kept one still wins a tie and anything it has filed since).
+  const newest = new Map<string, AudioEntry>()
+  for (const a of [...own, ...kept.filter((r) => r.kind === 'sample').map(keptEntry).filter(isAudioEntry)]) {
+    const had = newest.get(a.name)
+    if (!had || a.modified > had.modified || (a.modified === had.modified && a.id && !had.id)) newest.set(a.name, a)
+  }
+  return [...newest.values()].sort(byName)
 }
 
 // After a chapter's stem, only its speed may follow, as the tool matches its own files (names.chapter_audio): so
