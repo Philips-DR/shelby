@@ -61,12 +61,24 @@ def resolve_provider(explicit: str | None = None, env: dict | None = None) -> st
     return ANTHROPIC if environ.get("ANTHROPIC_API_KEY") else BEDROCK
 
 
+def named_model(provider: str) -> str | None:
+    """The model `.env` names for one route. Each route has its own line, because one id does not suit both: the API
+    takes a bare id (`claude-sonnet-5-5`), and this account's Bedrock answers only to a profile id, and only for the
+    models it has been granted (meet-ai's CLAUDE.md -> Reaching a model). ASSISTANT_MODEL, else SHELBY_MODEL, is the
+    API's; SHELBY_BEDROCK_MODEL is Bedrock's, which otherwise is DEFAULT_MODELS' Opus 4.6 (the user's choice when the
+    route became a switch in Settings, 2026-11-20)."""
+    if provider == BEDROCK:
+        return os.environ.get("SHELBY_BEDROCK_MODEL") or None
+    return os.environ.get("ASSISTANT_MODEL") or os.environ.get("SHELBY_MODEL") or None
+
+
 def model_config_from_environment(provider: str | None = None, model: str | None = None) -> ModelConfig:
     """The one place the environment is read for credentials. Front doors only."""
+    chosen = resolve_provider(provider)
     return ModelConfig(
-        provider=resolve_provider(provider),
-        # The id from `--model`, else ASSISTANT_MODEL, else SHELBY_MODEL (the one `.env` line both this and meet-ai read).
-        model=model or os.environ.get("ASSISTANT_MODEL") or os.environ.get("SHELBY_MODEL") or None,
+        provider=chosen,
+        # The id from `--model`, else the one `.env` names for this route (named_model).
+        model=model or named_model(chosen),
         region=os.environ.get("AWS_REGION"),
         profile=os.environ.get("AWS_PROFILE"),
         api_key=os.environ.get("ANTHROPIC_API_KEY"),

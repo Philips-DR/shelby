@@ -13,13 +13,14 @@ forces every other tool to agree on where identity lives.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from meetnotes.client import ModelConfig, resolve_provider
+from meetnotes.client import PROVIDERS, ModelConfig, resolve_provider
 from meetnotes.dictation import DICTATION_MAX_SECONDS, Dictation
 from meetnotes.operations import (
     MAX_SYNC_AUDIO_SECONDS,
@@ -60,8 +61,16 @@ def _failed(error: Exception) -> dict:
     return {"error": str(error)}
 
 
+# A model id as either provider names one: letters, digits and . - _ : only (`claude-sonnet-5-5`,
+# `us.anthropic.claude-opus-4-6-v1`, `anthropic.claude-3-haiku-20240307-v1:0`).
+_MODEL_ID = re.compile(r"[A-Za-z0-9._:-]{1,200}")
+
+
 def create_meet_ai_server(paths: ServerPaths, config: ModelConfig, dictation: Dictation | None = None) -> MCPServer:
     server = MCPServer(name="meet-ai", version=VERSION)
+    # The model notes and minutes call: as injected at launch, until `model_route` names another provider and model
+    # (Shelby's Settings switch). Only those two change; the region, profile and key stay as injected.
+    model_holder = {"config": config}
     # One per server process: its model stays loaded between clips (dictation.py).
     dictation = dictation or Dictation()
 
@@ -180,7 +189,7 @@ def create_meet_ai_server(paths: ServerPaths, config: ModelConfig, dictation: Di
             return with_model_usage(
                 generate_notes(
                     locate(timeline),
-                    config,
+                    model_holder["config"],
                     lexicon_path=Path(lexicon) if lexicon else None,
                     effort=effort,
                 )
@@ -228,12 +237,33 @@ def create_meet_ai_server(paths: ServerPaths, config: ModelConfig, dictation: Di
         try:
             return with_model_usage(
                 generate_minutes(
-                    locate(timeline), config,
+                    locate(timeline), model_holder["config"],
                     lexicon_path=Path(lexicon) if lexicon else None, effort=effort,
                 )
             )
         except (OperationError, OSError, ValueError) as error:
             return _failed(error)
+
+    @server.tool(
+        name="model_route",
+        title="Choose how notes reach the model",
+        description=(
+            "Which provider ('anthropic', the API key, or 'bedrock') and which model id notes and minutes use, "
+            "from the next call on. For Shelby's Settings, which keeps this tool on the same way to the model as "
+            "its chat. The credentials are the ones this tool was started with; nothing is checked or called here."
+        ),
+        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False),
+        # For the page's plumbing only: a model has no business choosing who bills it.
+        meta={"interface_only": True},
+    )
+    def _model_route(provider: str, model: str) -> dict:
+        if provider not in PROVIDERS:
+            return {"error": f"unknown provider {provider!r}; expected one of {', '.join(PROVIDERS)}"}
+        if not isinstance(model, str) or not _MODEL_ID.fullmatch(model):
+            return {"error": f"not a model id: {model!r}"}
+        current = replace(model_holder["config"], provider=provider, model=model)
+        model_holder["config"] = current
+        return {"provider": current.provider, "model": current.resolved_model}
 
     @server.tool(
         name="dictate",

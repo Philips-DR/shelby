@@ -6,7 +6,7 @@
 // thing that needs attention is found by its state (icon and word), not by reading.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { getHistory, getMe, getStatus, signOut, type AuditRow, type AuthInfo, type Level, type Status } from '../api'
+import { getHistory, getMe, getStatus, setModelRoute, signOut, type AuditRow, type AuthInfo, type Level, type ModelRoute, type Status } from '../api'
 import { DataTable } from '../charts/ChartCard'
 import { isTool, toolColor, toolName } from '../charts/palette'
 import { Sparkline } from '../charts/Sparkline'
@@ -209,7 +209,52 @@ function Verdict({ status, checking, checkedAt, error, onCheck }: {
 
 // ---- the model ------------------------------------------------------------------------------------
 
-function ModelCard({ model, checking }: { model: Status['model']; checking: boolean }) {
+/** The two ways to the model, as the switch names them: short enough for a phone. */
+const ROUTE_SHORT: Record<string, string> = { anthropic: 'API key', bedrock: 'Bedrock' }
+
+function RouteSwitch({ route, switching, problem, onChoose }: {
+  route: ModelRoute
+  switching: boolean
+  /** Why the last switch failed, or a tool that did not follow it. */
+  problem: string
+  onChoose: (provider: string) => void
+}) {
+  const now = route.choices.find((c) => c.provider === route.current)
+  const blocked = route.choices.filter((c) => c.provider !== route.current && c.unavailable)
+  return (
+    <div className="set-route">
+      <div className="seg set-route-seg" role="radiogroup" aria-label="Reach the model through" aria-busy={switching}>
+        {route.choices.map((c) => (
+          <button
+            type="button" key={c.provider} role="radio" aria-checked={route.current === c.provider}
+            disabled={switching || (c.provider !== route.current && c.unavailable !== null)}
+            onClick={() => { if (c.provider !== route.current) onChoose(c.provider) }}
+          >
+            {ROUTE_SHORT[c.provider] ?? c.label}
+          </button>
+        ))}
+      </div>
+      <p className="muted small set-route-note">
+        {switching
+          ? 'Switching…'
+          : now
+            ? <>Chat and meeting notes use <span className="mono">{now.model}</span> through {now.label}. A change applies from the next message.</>
+            : null}
+      </p>
+      {blocked.map((c) => <p key={c.provider} className="muted small set-route-note">{c.label}: {c.unavailable}</p>)}
+      {problem && <p className="error small set-route-note" role="alert">{problem}</p>}
+    </div>
+  )
+}
+
+function ModelCard({ model, checking, route, switching, routeProblem, onRoute }: {
+  model: Status['model']
+  checking: boolean
+  route?: ModelRoute
+  switching: boolean
+  routeProblem: string
+  onRoute: (provider: string) => void
+}) {
   const kind = loginOf(model)
   const words: Record<Level, string> =
     kind === 'signed-out' ? SIGNED_OUT_WORDS
@@ -224,9 +269,11 @@ function ModelCard({ model, checking }: { model: Status['model']; checking: bool
           : <Health level={model.level} words={words} />}
       </CardHead>
 
+      {route && <RouteSwitch route={route} switching={switching} problem={routeProblem} onChoose={onRoute} />}
+
       <dl className="set-facts">
         <div><dt>Model</dt><dd className="mono">{model.model}</dd></div>
-        <div><dt>Provider</dt><dd>{model.provider}</dd></div>
+        <div><dt>Provider</dt><dd>{route?.choices.find((c) => c.provider === model.provider)?.label ?? model.provider}</dd></div>
         {model.profile && <div><dt>Profile</dt><dd className="mono">{model.profile}</dd></div>}
         {model.region && <div><dt>Region</dt><dd className="mono">{model.region}</dd></div>}
       </dl>
@@ -446,6 +493,8 @@ export function Settings() {
   const [auth, setAuth] = useState<AuthInfo | null>(null)
   const [, tick] = useState(0)
   const { refreshLogin } = useAppState()
+  const [switching, setSwitching] = useState(false)
+  const [routeProblem, setRouteProblem] = useState('')
 
   const check = useCallback(async (live: boolean) => {
     setChecking(live)
@@ -460,6 +509,24 @@ export function Settings() {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setChecking(false)
+    }
+  }, [refreshLogin])
+
+  // The switch between the API key and Bedrock: the answer is the new way's login, checked there and then.
+  const chooseRoute = useCallback(async (provider: string) => {
+    setSwitching(true)
+    setRouteProblem('')
+    try {
+      const answer = await setModelRoute(provider)
+      setStatus((s) => (s ? { ...s, model: answer.model ?? s.model, route: answer.route } : s))
+      setCheckedAt(Date.now())
+      const missed = Object.entries(answer.tools).filter(([, said]) => said !== 'ok')
+      if (missed.length) setRouteProblem(missed.map(([tool, said]) => `${tool} did not follow: ${said}`).join(' · '))
+      void refreshLogin() // the sidebar names the model in use
+    } catch (e) {
+      setRouteProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSwitching(false)
     }
   }, [refreshLogin])
 
@@ -518,7 +585,7 @@ export function Settings() {
       <Verdict status={status} checking={checking} checkedAt={checkedAt} error={error} onCheck={() => void check(true)} />
 
       <div className="set-grid stagger">
-        <div style={{ '--i': 0 } as CSSProperties}><ModelCard model={status.model} checking={checking} /></div>
+        <div style={{ '--i': 0 } as CSSProperties}><ModelCard model={status.model} checking={checking} route={status.route} switching={switching} routeProblem={routeProblem} onRoute={(p) => void chooseRoute(p)} /></div>
         <div style={{ '--i': 1 } as CSSProperties}><NetworkCard network={status.network} checking={checking} /></div>
       </div>
 

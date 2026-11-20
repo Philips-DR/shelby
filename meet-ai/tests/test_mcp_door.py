@@ -57,7 +57,7 @@ def test_the_door_advertises_exactly_its_operations(server):
     names = sorted(tool.name for tool in asyncio.run(server.list_tools()))
     assert names == [
         "delete_audio", "delete_meeting", "dictate", "generate_minutes", "generate_notes",
-        "list_audio_sources", "list_recordings", "preview_minutes", "preview_notes",
+        "list_audio_sources", "list_recordings", "model_route", "preview_minutes", "preview_notes",
         "read_transcript", "read_written", "recording_status", "rename_audio",
         "start_recording", "start_transcription", "stop_recording",
         "transcribe", "transcription_status",
@@ -329,3 +329,52 @@ def test_a_meeting_can_be_named_the_way_a_person_names_it(server):
     read = call(server, "read_transcript", transcript="meeting")
     assert "Kwame" in read["text"]
     assert call(server, "preview_minutes", timeline="meeting")["segments"] == 2
+
+
+# ---- the way to the model, chosen in Shelby's Settings ------------------------------------------------------------
+
+
+def test_model_route_changes_what_notes_and_minutes_call_and_nothing_else(workspace, monkeypatch):
+    import meetnotes.mcp_server as door
+
+    seen = []
+
+    def fake(kind):
+        def generate(timeline, config, **kwargs):
+            seen.append((kind, config))
+            raise OperationError("stop here")
+        return generate
+
+    monkeypatch.setattr(door, "generate_notes", fake("notes"))
+    monkeypatch.setattr(door, "generate_minutes", fake("minutes"))
+    server = create_meet_ai_server(
+        ServerPaths(audio_dir=workspace / "audio", transcript_dir=workspace / "transcripts"),
+        ModelConfig(provider="anthropic", model="claude-sonnet-5-5", region="us-east-1", profile="p", api_key="sk"),
+    )
+    call(server, "generate_notes", timeline="meeting")
+    answer = call(server, "model_route", provider="bedrock", model="us.anthropic.claude-opus-4-6-v1")
+    assert answer == {"provider": "bedrock", "model": "us.anthropic.claude-opus-4-6-v1"}
+    call(server, "generate_notes", timeline="meeting")
+    call(server, "generate_minutes", timeline="meeting")
+    first, notes, minutes = (config for _kind, config in seen)
+    assert (first.provider, first.model) == ("anthropic", "claude-sonnet-5-5")
+    for config in (notes, minutes):
+        assert (config.provider, config.resolved_model) == ("bedrock", "us.anthropic.claude-opus-4-6-v1")
+        # the credentials it was started with are untouched
+        assert (config.region, config.profile, config.api_key) == ("us-east-1", "p", "sk")
+
+
+@pytest.mark.parametrize("arguments, said", [
+    ({"provider": "openai", "model": "gpt"}, "unknown provider"),
+    ({"provider": "bedrock", "model": ""}, "not a model id"),
+    ({"provider": "bedrock", "model": "us.anthropic.x; rm -rf /"}, "not a model id"),
+    ({"provider": "anthropic", "model": "x" * 201}, "not a model id"),
+])
+def test_model_route_refuses_what_is_not_a_provider_or_a_model_id_and_keeps_the_old(server, arguments, said):
+    assert said in call(server, "model_route", **arguments)["error"]
+    assert call(server, "model_route", provider="anthropic", model="claude-sonnet-5-5")["provider"] == "anthropic"
+
+
+def test_model_route_is_for_the_page_and_says_it_changes_something(server):
+    tool = next(t for t in asyncio.run(server.list_tools()) if t.name == "model_route")
+    assert tool.annotations.read_only_hint is False and tool.meta == {"interface_only": True}

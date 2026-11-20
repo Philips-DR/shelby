@@ -49,7 +49,7 @@ from assistant.auth import (
 from assistant.config import load_tool_servers, model_config_from_environment
 from assistant.db import Database
 from assistant.session import ApprovalRequest, allow_gate, execute, run_turn
-from assistant import files, texts
+from assistant import files, route, texts
 from assistant import uploads as up
 from assistant.collect import INVENTORY, RELEASE, Collector
 from assistant.records import kept_tools, records_for, shown
@@ -167,6 +167,24 @@ class Hub:
     @property
     def busy(self) -> bool:
         return self.turn is not None and not self.turn.done()
+
+    async def set_route(self, provider: Any, settings_path: Path) -> dict[str, str]:
+        """Reach the model the other way from now on (route.py): saved, used from the next chat turn (one already
+        running finishes on the way it began), told to every tool that follows it, audited, and the new way's login
+        checked at once. Returns what each tool said. Raises RouteError for a way that cannot be chosen."""
+        provider = route.check(provider)
+        try:
+            route.save(settings_path, provider)
+        except OSError as error:
+            raise route.RouteError(f"The choice could not be saved: {error.strerror or error}") from None
+        self.config = model_config_from_environment(provider)
+        self.logins.config = self.config
+        told = await route.tell_tools(self.registry, self.config)
+        followed = ", ".join(f"{tool} {answer}" for tool, answer in told.items()) or "no tool follows it"
+        await self.audit.record(tool="assistant__set_model_route", arguments={"provider": provider},
+                                outcome="ok", result=f"{self.config.resolved_model}; {followed}", origin="button")
+        await self.logins.check()
+        return told
 
     async def emit(self, event: dict[str, Any]) -> None:
         self.seq += 1
@@ -366,6 +384,7 @@ def create_app(
     google_redirect_uri: str | None = None,
     allowed_emails: frozenset[str] = frozenset(),
     database_url: str | None = None,
+    settings_path: Path | None = None,
 ) -> FastAPI:
     # Every file Shelby keeps (files.py): <root>/<id>/<name>, each recorded in the `files` table, or in
     # index.json there with no database. `legacy_uploads` is the old uploads folder, copied in once on start.
@@ -390,10 +409,13 @@ def create_app(
     lender = texts.Lender(texts_root, file_index)
     doc_batches = up.DocBatches()
     lexicon_path = lexicon_path_for(memory_path)
+    # The way to the model chosen in Settings (route.py), kept beside memory where ./auth can read it.
+    settings_path = settings_path or memory_path.with_name("settings.json")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        config = model_config_from_environment(provider, model)
+        # A provider on the command line wins; then the one chosen in Settings; then .env (a key wins).
+        config = model_config_from_environment(provider or route.load(settings_path), model)
         if database is not None:
             await database.connect()
         if legacy_uploads is not None:
@@ -412,6 +434,11 @@ def create_app(
                             refresh_context=lambda: context_for(memory, lexicon_path),
                             conversations=conversations, usage=usage)
         app.state.hub = holder["hub"]
+        app.state.settings_path = settings_path
+        # Tools that call a model themselves (meet-ai's notes) follow the same way to it, so a restart keeps the choice.
+        for tool_name, answer in (await route.tell_tools(registry, config)).items():
+            if answer != "ok":
+                log.warning("%s did not take the model route: %s", tool_name, answer)
         # What a tool made is taken into the store and the database: after a call that changed something, when
         # the watcher sees a job finish, and now, which the first time is the taking-in of what is already there.
         # Never after the tool's own inventory or release, which would only ask again.
@@ -769,10 +796,21 @@ def create_app(
             "model": h.logins.model or {"provider": h.config.provider, "model": h.config.resolved_model,
                                         "profile": h.config.profile, "region": h.config.region},
             "mail_compose": h.registry.find("mail_ai__send_draft") is not None,
+            "route": route.choices(h.config, route.load(settings_path)),
         }
         if live:
             out["network"] = network
         return out
+
+    @app.post("/api/model/route")
+    async def set_model_route(body: dict[str, Any]) -> Any:
+        """Settings' switch between the API key and Bedrock. Answers what /api/status would, freshly checked."""
+        h = hub()
+        try:
+            told = await h.set_route(body.get("provider"), settings_path)
+        except route.RouteError as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+        return {"model": h.logins.model, "route": route.choices(h.config, route.load(settings_path)), "tools": told}
 
     # -----------------------------------------------------------------------
     # Uploads. The body is the file itself, streamed to disk -- a four-hour recording is
@@ -1134,7 +1172,9 @@ def main() -> None:
                      google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET") or None,
                      google_redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI") or None,
                      allowed_emails=parse_allowed_emails(os.environ.get("ASSISTANT_ALLOWED_EMAILS")),
-                     database_url=os.environ.get("DATABASE_URL") or None)
+                     database_url=os.environ.get("DATABASE_URL") or None,
+                     # Settings' choice of the way to the model (route.py); beside memory unless named.
+                     settings_path=Path(os.environ["ASSISTANT_SETTINGS"]) if os.environ.get("ASSISTANT_SETTINGS") else None)
     holder["app"] = app
     # Loopback unless ASSISTANT_HOST says otherwise, and it says otherwise only in the container
     # setup, whose compose file publishes the port to 127.0.0.1 and to a private Tailscale

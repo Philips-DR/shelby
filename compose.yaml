@@ -66,6 +66,7 @@ services:
       # Where each tool keeps what it keeps: all under the one volume.
       ASSISTANT_MEMORY: /data/assistant/memory.json
       ASSISTANT_AUDIT: /data/assistant/audit.jsonl
+      ASSISTANT_SETTINGS: /data/assistant/settings.json   # Settings' choice of API key or Bedrock; ./auth reads it
       # The central file store: every upload, in a folder of its own, recorded in the database (plan.md, layer 1b).
       ASSISTANT_FILES: /data/files
       # Markdown is in the database itself; a tool that reads one gets a copy here for that one call, removed

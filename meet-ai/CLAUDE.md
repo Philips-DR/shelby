@@ -301,6 +301,13 @@ ever run against the API, there being no key), and `SHELBY_MODEL` in `.env` (or 
 code change. The notes and minutes call uses `thinking` and `output_config` (effort, JSON schema), which are Anthropic's; a provider
 that is not Anthropic would need an adapter here and in the assistant, and is not built (an Anthropic key is enough for now).
 
+**The way to the model can change while running (2026-11-20).** Shelby's Settings has a switch between the API key and
+Bedrock, and notes and minutes follow it: `model_route(provider, model)` (`interface_only`, not read-only) replaces the
+provider and model the door uses from the next call; the region, profile and key stay as injected at launch. Shelby
+calls it on start and on every switch (`assistant/route.py`). A bad provider or a model id with anything but letters,
+digits and `. _ : -` is refused as `{"error"}` and changes nothing. Run alone, nothing calls it and the environment decides,
+as before. Run for real: notes on Bedrock (Opus 4.6) after a switch, through Shelby.
+
 **Saying what a model call took (2026-11-20).** `generate_notes` and `generate_minutes` results carry `input_tokens` and
 `provider` as well as `output_tokens` and `model`, and the MCP door adds one key, `model_usage` (`with_model_usage`:
 `{model, provider, input_tokens, output_tokens}`). The assistant adds up model cost for its Overview from that key and

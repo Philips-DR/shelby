@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every login Shelby depends on, in one command:
 #
-#   aws           the model, through Bedrock (AWS SSO; lapses overnight) -- unless ANTHROPIC_API_KEY is set
+#   aws           the model, through Bedrock (AWS SSO; lapses overnight) -- when Settings chose it, or there is no API key
 #   anthropic     the model, through an Anthropic API key (checked, never renewed here: replace it in .env)
 #   docu-ai       Google Docs, to build documents
 #   mail-ai       Gmail, read-only
@@ -27,8 +27,18 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 [[ -x .venv/bin/python ]] || { echo "Not set up yet. Run ./setup first." >&2; exit 1; }
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
-# An API key in .env wins over Bedrock, as it does in the assistant and in meet-ai (`resolve_provider`).
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then MODEL_LOGIN=anthropic; else MODEL_LOGIN=aws; fi
+# The way to the model chosen in Settings (assistant/assistant/route.py) decides which login is in use; with nothing
+# chosen there, an API key in .env wins over Bedrock, as it does in the assistant and in meet-ai (`resolve_provider`).
+# Only the one in use is checked: AWS lapses overnight, and renewing it opens a browser nobody needs on the API key.
+SETTINGS="${ASSISTANT_SETTINGS_HOST:-data/assistant/settings.json}"
+ROUTE=$([[ -f $SETTINGS ]] && .venv/bin/python -c 'import json, sys
+try: print(json.load(open(sys.argv[1])).get("model_route") or "")
+except Exception: print("")' "$SETTINGS")
+case "$ROUTE" in
+  bedrock)   MODEL_LOGIN=aws ;;
+  anthropic) MODEL_LOGIN=anthropic ;;
+  *) if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then MODEL_LOGIN=anthropic; else MODEL_LOGIN=aws; fi ;;
+esac
 ALL=("$MODEL_LOGIN" docu-ai mail-ai mail-compose)
 
 # Is a Google refresh token still accepted? Prints ok, dead, missing or unknown (no network,

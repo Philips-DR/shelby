@@ -60,6 +60,12 @@
   .set-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* the switch between the API key and Bedrock, above the facts: full width on a phone, its own width on a wide card */
+.set-route { container-type: inline-size; display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.set-route-seg { align-self: flex-start; max-width: 100%; }
+.set-route-seg button { white-space: nowrap; }
+.set-route-note { margin: 0; overflow-wrap: anywhere; }
+@container (max-width: 420px) { .set-route-seg { align-self: stretch; } .set-route-seg button { flex: 1; } }
 .set-facts { margin: 0; display: flex; flex-direction: column; }
 .set-facts > div { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; padding: 9px 0; border-top: 1px solid var(--line); }
 .set-facts > div:first-child { border-top: 0; padding-top: 0; }

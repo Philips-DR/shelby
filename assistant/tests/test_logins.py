@@ -409,7 +409,7 @@ def test_no_aws_login_at_all_is_not_set_up_either(monkeypatch):
 
 def test_the_model_can_be_named_in_the_environment(monkeypatch):
     from assistant.config import model_config_from_environment
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.delenv("ASSISTANT_MODEL", raising=False)
     monkeypatch.setenv("SHELBY_MODEL", "claude-sonnet-5-5")
     assert model_config_from_environment().model == "claude-sonnet-5-5"
@@ -419,6 +419,21 @@ def test_the_model_can_be_named_in_the_environment(monkeypatch):
     monkeypatch.delenv("SHELBY_MODEL")
     monkeypatch.delenv("ASSISTANT_MODEL")
     assert model_config_from_environment().model is None
+
+
+def test_each_route_has_its_own_model_line(monkeypatch):
+    """The API's id is not Bedrock's: `claude-sonnet-5-5` on Bedrock would be `anthropic.claude-sonnet-5-5`, which
+    this account does not answer to. So SHELBY_MODEL is the API's only, and Bedrock has SHELBY_BEDROCK_MODEL."""
+    from assistant.config import ANTHROPIC, BEDROCK, model_config_from_environment
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("SHELBY_MODEL", "claude-sonnet-5-5")
+    monkeypatch.delenv("ASSISTANT_MODEL", raising=False)
+    monkeypatch.delenv("SHELBY_BEDROCK_MODEL", raising=False)
+    assert model_config_from_environment(ANTHROPIC).resolved_model == "claude-sonnet-5-5"
+    assert model_config_from_environment(BEDROCK).resolved_model == "us.anthropic.claude-opus-4-6-v1"
+    monkeypatch.setenv("SHELBY_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-6")
+    assert model_config_from_environment(BEDROCK).resolved_model == "us.anthropic.claude-sonnet-4-6"
+    assert model_config_from_environment(ANTHROPIC).resolved_model == "claude-sonnet-5-5"
 
 
 # ---- a chat turn that failed because of the model ---------------------------------------------------------------

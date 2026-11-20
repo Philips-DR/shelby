@@ -300,6 +300,8 @@ export interface Status {
     checked_at?: number
   }
   mail_compose: boolean
+  /** The way to the model, chosen in Settings (assistant/route.py); absent from an older backend. */
+  route?: ModelRoute
   network?: {
     name: string
     host: string
@@ -313,6 +315,21 @@ export interface Status {
 }
 
 export const getStatus = (live = false) => request<Status>(`/api/status${live ? '?live=true' : ''}`)
+
+export interface ModelRoute {
+  /** The provider in use: 'anthropic' (the API key) or 'bedrock'. */
+  current: string
+  /** What Settings chose; null when .env decides (a key wins). */
+  saved: string | null
+  choices: { provider: string; label: string; model: string; unavailable: string | null }[]
+}
+
+/** Reach the model the other way, from the next message on: Chat and meeting notes both follow. The answer is the
+ *  new way's login, checked there and then, and the route as it now stands. */
+export const setModelRoute = (provider: string) =>
+  request<{ model: Status['model']; route: ModelRoute; tools: Record<string, string> }>('/api/model/route', {
+    method: 'POST', body: JSON.stringify({ provider }),
+  })
 
 export const sendChat = (message: string) =>
   request<{ accepted: boolean }>('/api/chat', { method: 'POST', body: JSON.stringify({ message }) })

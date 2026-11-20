@@ -7,6 +7,8 @@ __pycache__/
 memory.json
 lexicon.json
 audit.jsonl
+# Choices made in Settings (route.py: the way to the model).
+settings.json
 
 # What people upload: audio to transcribe, markdown to turn into Docs. files/ is the store they now go to
 # (files.py); uploads/ is the old folder, copied into it once. texts/ holds a document lent to a tool, for

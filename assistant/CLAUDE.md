@@ -507,6 +507,34 @@ Google Docs `ok`, with the service names the tools gave. Then a second copy with
 issued and the Docs token absent: Google's own `invalid_grant` came back as `dead` and the missing file as `missing`, and the page
 showed three things signed out with one `./auth`. The real tokens were never touched.
 
+## API key or Bedrock: the switch in Settings (`route.py`, 2026-11-20)
+
+The user asked for a switch between the two ways to the model; before, `.env` decided and a key always won. The user's
+choices: **Chat and meeting notes both follow it**, and **Bedrock uses Opus 4.6** (`us.anthropic.claude-opus-4-6-v1`).
+
+- **Each route has its own model line** (`config.named_model`): `ASSISTANT_MODEL`/`SHELBY_MODEL` are the API's,
+  `SHELBY_BEDROCK_MODEL` is Bedrock's (default Opus 4.6). One id cannot serve both: `claude-sonnet-5-5` on Bedrock
+  would be `anthropic.claude-sonnet-5-5`, which this account does not answer to (meet-ai/CLAUDE.md -> Reaching a model).
+  Before this, `SHELBY_MODEL` applied to Bedrock too; with no key it now does not.
+- **Kept in `settings.json`** beside memory (`ASSISTANT_SETTINGS`, `/data/assistant/settings.json` in the containers),
+  **not the database**: `./auth` runs on the host, cannot reach Postgres (no published port), and must know which
+  login is in use, so that it renews AWS (which lapses overnight and opens a browser) only when Bedrock is chosen.
+  Written whole and renamed into place; a missing or broken file means ".env decides". `--provider` still wins.
+- **`POST /api/model/route {provider}`** saves it, makes it the hub's config (a turn already running finishes the way
+  it began), tells the tools, audits `assistant__set_model_route` (origin button), and checks the new way's login at
+  once. `/api/status` carries `route` (current, saved, each choice with its model and why it cannot be chosen: no key,
+  no AWS profile). A dead login is not a reason to refuse: Settings shows it and `./auth` renews it.
+- **A tool follows through one agreed name, `model_route`** `{provider, model}`, like `login_status`: called on start
+  (so a restart keeps the choice) and on every switch, only on a tool that declares it changes something, with a
+  10 s limit, never raising. A refusal counts whether it comes as an MCP error or as `{"error"}` in the answer, which
+  is how meet-ai refuses. meet-ai is the one tool that offers it; its credentials stay as injected at launch. Chosen
+  over restarting the tool (what was first described to the user): the registry cannot restart one server (its
+  sessions share one exit stack, entered in the lifespan's task), and this needs no restart at all.
+- **Run for real (2026-11-20)** on a throwaway backend with real meet-ai (port 8761, own folders): chat on the key
+  (Sonnet 5.5), switch (meet-ai ok, AWS login ok), chat on Bedrock (Opus 4.6), meeting notes on Bedrock (Opus 4.6,
+  notes correct), switch back, chat on the key; the usage rows said so each time. A restart kept Bedrock. Settings in
+  Chrome at 360-1440, both themes, one real click each way. `./auth --check` follows the file.
+
 ## Model usage and price (`usage.py`, `007_model_usage.sql`, 2026-11-20)
 
 The Overview's "Model usage" section (tokens in and out, calls, estimated cost, by source) is drawn from one row per
