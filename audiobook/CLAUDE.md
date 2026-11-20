@@ -208,7 +208,7 @@ verse four" and every other book "John chapter three, verse sixteen". `1 John` i
   (Purpose and Power of Woman), 205 (Overcoming Addictive Behavior), 212 (When Godly People Do Ungodly Things), 242
   (Rediscovering Kingdom Worship). **Re-rendered 2026-11-19: only *Rediscovering Kingdom Worship*** (45 chapters, 5.65 h, voice
   abigail, 0.95x as on 2026-11-16): the first pass made 242 pieces, the second 18 more. It was run on the host, not through the
-  app, because the container still held the old code: `PYTHONPATH=<audiobook> .venv/bin/python -m audiobook render <pdf>
+  app, because the container still held the old code (it has the new code since 2026-11-20, when `./start` rebuilt it; the book scratch-folder method below is no longer needed for new renders): `PYTHONPATH=<audiobook> .venv/bin/python -m audiobook render <pdf>
   --voice abigail --speed 0.95` from a folder whose `.cache`, `output`, `voices` and `voice` are links to `data/audiobook/`
   (same cache, so the voice-file hash `c0eac2e8368cbfe0` must match, or the whole book is spoken again). The new MP3s are in
   `data/audiobook/output/<book>/`; the earlier ones had been filed by Shelby and released from there. The others are not

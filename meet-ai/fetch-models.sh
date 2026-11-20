@@ -6,14 +6,22 @@
 # in an image build (2026-10-28) while Hugging Face answered. Each file is checked against the SHA-256
 # of the copy this was written against, so a changed or truncated download fails loudly instead of
 # quietly breaking diarization later.
+#
+# Each URL names a commit, not "main" (2026-11-20): the owner of the embedding repo replaced that file on
+# Hugging Face a day before an image build, "main" then served a different file (one byte longer, other
+# hash) and the build failed on the check, though nothing here had changed. A commit never changes, so the
+# check now tests the download, not whether upstream moved. Both commits were fetched and hashed against
+# the pins below. To take a newer model on purpose: change the commit and the hash together.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 mkdir -p models && cd models
 
 SEG_DIR=sherpa-onnx-pyannote-segmentation-3-0
-SEG_BASE=https://huggingface.co/csukuangfj/$SEG_DIR/resolve/main
+SEG_REV=9403a6902bb58e3d5ae8c7e77c3422de279db2e0
+SEG_BASE=https://huggingface.co/csukuangfj/$SEG_DIR/resolve/$SEG_REV
 # Upstream's file is named for its original release; diarize.py looks for campplus_en.onnx.
-EMB=https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
+EMB_REV=0743f301363dec56491a490f6d6cbc9d67f9a3bf
+EMB=https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/$EMB_REV/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
 
 SEG_SHA256=220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079
 EMB_SHA256=357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b
