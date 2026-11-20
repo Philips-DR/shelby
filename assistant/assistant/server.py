@@ -1020,6 +1020,20 @@ def create_app(
         await h.emit({"type": "upload", "kind": "docs", "id": record.id, "name": record.name, "path": str(path)})
         return {"id": record.id, "name": record.name, "path": str(path), "files": names}
 
+    # A PDF, Word file or plain text: its text taken out (in a child process, convert.py) and kept as markdown is.
+    @app.put("/api/uploads/document")
+    async def upload_document(request: Request, name: str):
+        h = hub()
+        try:
+            record, names = await up.take_document(file_index, name, request.stream())
+        except up.UploadError as error:
+            return refuse(error)
+        path = texts.path_for(texts_root, record, names)
+        h.note_text(f"The user attached {Path(name).name}. Its text was taken out (pictures and layout are not kept) "
+                    f"and is ready to read at {path}.")
+        await h.emit({"type": "upload", "kind": "docs", "id": record.id, "name": record.name, "path": str(path)})
+        return {"id": record.id, "name": record.name, "path": str(path), "files": names, "source": Path(name).name}
+
     @app.get("/api/history")
     async def audit_history(limit: int = 200) -> list[dict[str, Any]]:
         """The durable record of every tool call, newest first -- the live event stream only

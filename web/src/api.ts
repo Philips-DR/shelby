@@ -463,10 +463,15 @@ export const AUDIO_EXTS = ['.m4a', '.mp3', '.wav', '.flac', '.ogg', '.opus', '.w
 const ext = (name: string) => name.slice(name.lastIndexOf('.')).toLowerCase()
 export const isAudio = (name: string) => AUDIO_EXTS.includes(ext(name))
 export const isMarkdown = (name: string) => ext(name) === '.md'
+/** A document whose text the server takes out and keeps as it keeps markdown (assistant/convert.py). */
+export const DOCUMENT_EXTS = ['.pdf', '.docx', '.txt']
+export const isDocument = (name: string) => DOCUMENT_EXTS.includes(ext(name))
 
 // `id` is the upload's in the file store: what deleting goes by, since the same name may be uploaded twice.
 export interface UploadedAudio { id: string; name: string; path: string; bytes: number }
 export interface UploadedDocs { id: string; name: string; path: string; files: string[] }
+/** `source` is the file as it was attached (`CV.pdf`); `files` holds the text it became (`CV.md`). */
+export interface UploadedDocument extends UploadedDocs { source: string }
 export interface Uploads {
   audio: (UploadedAudio & { at: number })[]
   docs: (UploadedDocs & { at: number })[]
@@ -505,6 +510,11 @@ export const getUploads = () => request<Uploads>('/api/uploads')
 
 export const uploadAudio = (file: File, onProgress?: (fraction: number) => void) =>
   put<UploadedAudio>(`/api/uploads/audio?name=${encodeURIComponent(file.name)}`, file,
+    (sent) => onProgress?.(file.size ? sent / file.size : 1))
+
+/** A PDF, Word file or plain text: kept as its text, read by the model like any markdown. */
+export const uploadDocument = (file: File, onProgress?: (fraction: number) => void) =>
+  put<UploadedDocument>(`/api/uploads/document?name=${encodeURIComponent(file.name)}`, file,
     (sent) => onProgress?.(file.size ? sent / file.size : 1))
 
 export interface Dictated {

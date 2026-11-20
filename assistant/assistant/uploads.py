@@ -1,5 +1,6 @@
 """Files a person hands the assistant: audio to transcribe, markdown to turn into a Doc,
-a PDF to make into an audiobook, a recording to clone a voice from.
+a PDF to make into an audiobook, a recording to clone a voice from, and a document (PDF, Word, text)
+whose text is taken out (convert.py) and kept as markdown is.
 
 Each file is kept in the central file store (files.py): in a new folder of its own, under its own name, with a
 record in the `files` table. An upload still ends in a path, and a path is what every tool already takes --
@@ -17,12 +18,13 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from assistant import files, texts
+from assistant import convert, files, texts
 from assistant.files import FileIndex, StoredFile
 from assistant.texts import DRAFT
 
@@ -205,6 +207,37 @@ async def receive(target: Path, chunks: AsyncIterator[bytes], limit: int) -> tup
     except BaseException:
         part.unlink(missing_ok=True)
         raise
+
+
+async def take_document(index: FileIndex, name: str, chunks: AsyncIterator[bytes]) -> tuple[StoredFile, list[str]]:
+    """A PDF, Word file or plain text, kept as markdown is: its text in the database (convert.py), one file named
+    for it (`CV.pdf` becomes `CV.md`, so docu-ai titles a Doc "CV"). The file itself is read from a folder of its
+    own under a name of ours, and that folder is gone when this returns, whatever happened."""
+    name = _clean_component(Path(name).name)
+    suffix = Path(name).suffix.lower()
+    if suffix == ".doc":
+        raise UploadError(f"{name} is an old Word file: save it as .docx and attach that")
+    if suffix not in convert.CONVERTIBLE:
+        raise UploadError(f"{name} is not a document this can read ({', '.join(sorted(convert.CONVERTIBLE))})")
+    stem = document_name(Path(name).stem)
+    folder = Path(tempfile.mkdtemp(prefix="document-"))
+    try:
+        source = folder / f"document{suffix}"
+        await receive(source, chunks, convert.MAX_DOCUMENT_BYTES)
+        try:
+            text = await convert.text_of(source, name)
+        except convert.ConversionError as error:
+            raise UploadError(str(error)) from None
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    if len(text.encode("utf-8")) > MAX_DOC_BYTES:
+        raise UploadError(f"{name} holds more than {MAX_DOC_BYTES // 1024**2} MB of text")
+    kept = {f"{stem}.md": text}
+    sha256, size = files.texts_digest(kept)
+    record = StoredFile(id=files.new_id(), kind="docs", name=stem, bytes=size, sha256=sha256,
+                        made_by="user", created=time.time())
+    await index.add(record, kept)
+    return record, sorted(kept)
 
 
 async def keep(index: FileIndex, file_id: str, kind: str, target: Path, size: int, sha256: str) -> StoredFile:

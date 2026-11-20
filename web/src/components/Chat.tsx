@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AUDIO_EXTS, clearChat, continueConversation, getConversation, isAudio, isMarkdown, sendChat, splitDocs, stopChat, uploadAudio, uploadDocs, type AssistantEvent } from '../api'
+import { AUDIO_EXTS, DOCUMENT_EXTS, clearChat, continueConversation, getConversation, isAudio, isDocument, isMarkdown, sendChat, splitDocs, stopChat, uploadAudio, uploadDocs, uploadDocument, type AssistantEvent } from '../api'
 import { useAppState } from '../state'
 import { BrandMark } from '../ui/Shell'
 import { DropZone } from '../ui/DropZone'
@@ -76,6 +76,10 @@ function Copy({ text }: { text: string }) {
     </button>
   )
 }
+
+/** What the chat takes: a recording to transcribe, markdown, or a document whose text the server takes out. */
+const attachable = (name: string) => isAudio(name) || isMarkdown(name) || isDocument(name)
+const refused = (names: string[]) => `Not attached — only audio, PDF, Word (.docx), text or markdown files: ${names.join(', ')}`
 
 export function Chat() {
   const { events, pending, busy, connected, titles, tools } = useAppState()
@@ -149,8 +153,9 @@ export function Chat() {
     setError('')
     const audio = files.filter((f) => isAudio(f.name))
     const docs = files.filter((f) => isMarkdown(f.name))
-    const other = files.filter((f) => !isAudio(f.name) && !isMarkdown(f.name))
-    if (other.length) setError(`Not attached — only audio or markdown: ${other.map((f) => f.name).join(', ')}`)
+    const documents = files.filter((f) => isDocument(f.name))
+    const other = files.filter((f) => !attachable(f.name))
+    if (other.length) setError(refused(other.map((f) => f.name)))
     try {
       for (const f of audio) {
         setUploading({ name: f.name, fraction: 0 })
@@ -162,6 +167,12 @@ export function Chat() {
         setUploading({ name, fraction: 0 })
         const saved = await uploadDocs(top, name, (fraction) => setUploading({ name, fraction }))
         setAttached((a) => [...a, ...saved.files])
+      }
+      // A PDF, Word file or text: sent whole, then read on the server, which keeps its text. Named as attached.
+      for (const f of documents) {
+        setUploading({ name: f.name, fraction: 0 })
+        const saved = await uploadDocument(f, (fraction) => setUploading({ name: f.name, fraction }))
+        setAttached((a) => [...a, saved.source])
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -329,9 +340,9 @@ export function Chat() {
   return (
     <DropZone
       className="chat"
-      accepts={(f) => isAudio(f.name) || isMarkdown(f.name)}
-      label="Drop audio or markdown to attach"
-      onRefuse={(names) => setError(`Not attached — only audio or markdown: ${names.join(', ')}`)}
+      accepts={(f) => attachable(f.name)}
+      label="Drop a recording or a document to attach"
+      onRefuse={(names) => setError(refused(names))}
       onFiles={(files) => void attach(files)}
       disabled={!connected || uploading !== null || viewing !== null}
     >
@@ -410,9 +421,9 @@ export function Chat() {
           <form className={`composer${listening ? ' listening' : ''}`} onSubmit={(e) => void submit(e)}>
             {!listening && !viewing && <PickFiles
               label=""
-              ariaLabel="Attach a recording or a markdown file"
+              ariaLabel="Attach a recording or a document: PDF, Word, text or markdown"
               icon={<IconAttach size={18} aria-hidden />}
-              accept={[...AUDIO_EXTS, '.md'].join(',') + ',audio/*'}
+              accept={[...AUDIO_EXTS, '.md', ...DOCUMENT_EXTS].join(',') + ',audio/*'}
               multiple
               disabled={!connected || uploading !== null}
               onPick={(files) => void attach(files)}
@@ -461,7 +472,7 @@ export function Chat() {
               )}
           </form>
           <p className="sr-only" role="status">{listening ? 'Recording. Press the microphone again to stop.' : writing ? 'Writing down what you said.' : ''}</p>
-          <p className="composer-hint muted small">{viewing && !listening && !writing ? 'Sending continues this chat · the one you were in stays in History' : listening ? `Recording ${clock(dictation.elapsed)} of up to 2 minutes · press the microphone to stop · Esc throws it away` : writing ? 'Writing down what you said' : busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a markdown file to attach it'}</p>
+          <p className="composer-hint muted small">{viewing && !listening && !writing ? 'Sending continues this chat · the one you were in stays in History' : listening ? `Recording ${clock(dictation.elapsed)} of up to 2 minutes · press the microphone to stop · Esc throws it away` : writing ? 'Writing down what you said' : busy ? 'Stop ends the reply: a step already running finishes, nothing after it starts' : 'Enter to send · Shift+Enter for a new line · drop a recording or a document to attach it'}</p>
         </>
       {error && <p className="error composer-error">{error}</p>}
       {dictation.error && <p className="error composer-error">{dictation.error}</p>}

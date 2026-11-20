@@ -251,6 +251,37 @@ database directly.
 - **Each upload is noted for the model** with the next message, like a button press — which is
   what makes "transcribe what I just uploaded" work, from either mode.
 
+## Documents attached in chat (`convert.py`, `PUT /api/uploads/document`, 2026-11-20)
+
+Chat refused anything but audio and `.md` ("only audio or markdown"). A PDF, a Word file (`.docx`) or plain text
+(`.txt`) is now taken: its text is taken out and kept exactly as an uploaded markdown file is (a `docs` row and one
+`file_texts` row, `CV.pdf` kept as `CV.md`), so `read_document`, apply-ai and docu-ai all take it, and the model is
+told "its text was taken out (pictures and layout are not kept)". The user's choice over handing the PDF itself to
+the model, which would have meant PDFs only, the whole file re-sent every turn, and nothing the CV checks could read.
+The file itself is not kept: it is read from a temporary folder, under a name of ours, and that folder is removed
+whatever happens. An old `.doc` is refused with "save it as .docx".
+
+- **Intake, not domain logic.** It changes a file's format, as checking markdown is UTF-8 does, and knows nothing of
+  what a document says.
+- **A PDF or Word file is read in a child process**, `python -m assistant.convert FILE NAME`, never in the backend:
+  PDFium (pypdfium2) and libxml2 (python-docx) are native code reading a stranger's file, and PDFium has crashed the
+  audiobook tool before. The child gets no secrets (`CHILD_ENV`: no token, database address or model key), a 3 GB
+  memory limit and 90 s, and answers one line of JSON. A crash, a hang, a library's exception or nonsense on stdout
+  is that upload refused in plain words ("could not be read: the file may be damaged"). Plain text is read in-process.
+- **A hyphen at a line end is kept.** PDFium joins a word that runs over a line end and marks the hyphen with
+  U+FFFE, for "Role-Based" and "distin-guishes" alike (21 in a 36-page paper, about half real compounds; both in a
+  real CV were). Dropping it makes words nobody wrote ("RoleBased"), and the CV checks match words, so it is "-".
+- **Word headings come only from Word's own styles** (Title, Heading 1-6; lists from List styles or numbering;
+  tables a row to a line). A file that makes headings by setting Normal text bold and large (a real one did) reads as
+  plain lines: the text is all there, the `#` marks are not.
+- **Not handled:** a scanned PDF (no text layer) is refused and says so, rather than read by OCR; a PDF with a
+  password is refused; headers, footers, comments and pictures in a Word file are not read.
+- **Run for real (2026-11-20)** on a throwaway backend (own folders, no tools, port 8760), not the containers (a
+  render was running): the user's real CV PDF (0.3 s), a real 37,000-character Word file (0.9 s) and the 36-page
+  arXiv paper (1.3 s); then a real turn on Sonnet 5.5 called `read_document` on both and answered from them
+  correctly. The chat box in Chrome at 360-1440, both themes: the chip, the refusal, no overflow, axe clean but for
+  the sidebar's "Search and jump" button (`label-content-name-mismatch`, there before this).
+
 ## What tools made, kept (`records.py`, `collect.py`, 2026-11-01)
 
 Layer 1b, phase B of `../plan.md`, in the shape the user chose ("A", 2026-11-01): **a tool labels what it made; the
