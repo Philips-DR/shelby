@@ -1,21 +1,23 @@
 /*
  * Follow along: the chapter's text as a full-screen layer (components/AudioFollow.tsx). Colours, type sizes and
  * durations are tokens; the tool's colour arrives as --pa and marks the paragraph being read (a mark, never text),
- * the bar's position as --progress, written every frame by the player engine. The sentence being spoken is moved by
- * the DOM, a frame at a time, through the `read` and `on` classes on its sentences.
+ * the bar's position written every frame by the player engine straight onto the few elements that draw it
+ * (player/progress.ts: inline properties, never a variable on this layer, which would make the browser re-style
+ * the whole text sixty times a second). The sentence being spoken is moved by the DOM, a frame at a time,
+ * through the `read` and `on` classes on its sentences.
  */
 
 .follow {
   --pa-ink: color-mix(in srgb, var(--pa, var(--brand)) 64%, var(--ink));
   --pa-soft: color-mix(in srgb, var(--pa, var(--brand)) 14%, transparent);
   --pa-glow: color-mix(in srgb, var(--pa, var(--brand)) 30%, transparent);
-  --progress: 0;
   --hit: color-mix(in srgb, var(--pa, var(--brand)) 28%, transparent);
   position: fixed;
   inset: 0;
   z-index: 55;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);  /* the width of the screen, never what a long album title in the bars would like */
   color: var(--ink);
   background:
     radial-gradient(ellipse 140% 50% at 50% -5%, color-mix(in srgb, var(--pa, var(--brand)) 18%, transparent) 0%, transparent 70%),
@@ -161,22 +163,16 @@
 .fo-wave svg { display: block; overflow: visible; }
 .fo-wave-rest rect { fill: color-mix(in srgb, var(--ink-3) 28%, transparent); }
 .fo-wave-played rect { fill: var(--pa-ink); filter: drop-shadow(0 0 6px var(--pa-glow)); }
-.fo-wave-played {
-  -webkit-mask-image: linear-gradient(to right,
-    black calc(var(--progress, 0) * 100% - 8px),
-    transparent calc(var(--progress, 0) * 100%)
-  );
-  mask-image: linear-gradient(to right,
-    black calc(var(--progress, 0) * 100% - 8px),
-    transparent calc(var(--progress, 0) * 100%)
-  );
+.fo-wave-played {                          /* the mask is written inline every frame (`played`); this is the resting state */
+  -webkit-mask-image: linear-gradient(to right, transparent, transparent);
+  mask-image: linear-gradient(to right, transparent, transparent);
 }
 
 .fo-wave-head {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--progress, 0) * 100%);
+  left: 0;                                 /* written inline every frame (`head`) */
   width: 2px;
   margin-left: -1px;
   background: var(--pa-ink);
@@ -252,7 +248,7 @@
 .fo-np-sep { margin: 0 3px; opacity: 0.5; }
 
 .fo-line { position: absolute; left: 0; right: 0; top: -1px; height: 3px; background: var(--line); pointer-events: none; }
-.fo-line i { position: absolute; inset: 0; background: var(--pa-ink); transform-origin: left; transform: scaleX(var(--progress, 0)); }
+.fo-line i { position: absolute; inset: 0; background: var(--pa-ink); transform-origin: left; transform: scaleX(0); /* written inline every frame (`fill`) */ }
 .fo-controls { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 28rem; margin: 0 auto; }
 .fo-controls .pplay {
   box-shadow: var(--shadow-1);

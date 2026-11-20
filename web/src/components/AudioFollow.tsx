@@ -24,12 +24,14 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, useS
 import { createPortal } from 'react-dom'
 import { call } from '../call'
 import { useWidth } from '../charts/useWidth'
-import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock } from '../player/engine'
+import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock, useProgressRef } from '../player/engine'
 import { clock } from '../player/format'
+import { fill, head, played } from '../player/progress'
 import { store } from '../player/storage'
 import { WAVE_BUCKETS } from '../player/waveform'
 import { IconAudiobooks, IconClose, IconForward, IconList, IconNext, IconPage, IconPause, IconPlay, IconPrevious, IconRewind, IconSpeak, IconTrash } from '../ui/icons'
 import { activeSegment, spokenSegments, type SegmentTiming } from './audiobookTiming'
+import { ARRIVED, glideBy } from './audiobookGlide'
 import { unitAt, unitsFor, wordsOf, type Unit } from './audiobookSentences'
 import '../styles/player.css'
 import '../styles/panels/follow.css'
@@ -43,6 +45,9 @@ export interface FollowChapter { number: number; label: string; speech: string; 
 /** Where the highlighted text sits, as a share of the scroller's visible height.
  * Slightly above center so the active sentence stays clear of the bottom fade mask. */
 const ANCHOR = 0.42
+/** The played bars fade out over this many pixels at the playhead, so the edge is soft. */
+const PLAYED_FADE = 8
+const paintPlayed = played(PLAYED_FADE)
 /** A paragraph is restarted rather than skipped back from when this far into it. */
 const RESTART_AFTER = 2
 
@@ -59,6 +64,9 @@ const FoWave = memo(function FoWave({ onSeek }: { onSeek: (t: number) => void })
   const { wave } = usePlayer()
   const { duration } = usePlayerClock()
   const act = usePlayerActions()
+  const line = useProgressRef(fill)
+  const playedBars = useProgressRef(paintPlayed)
+  const playhead = useProgressRef(head)
   const [ref, width] = useWidth<HTMLDivElement>(320)
   const dragging = useRef(false)
 
@@ -100,13 +108,13 @@ const FoWave = memo(function FoWave({ onSeek }: { onSeek: (t: number) => void })
   }
 
   if (wave.state !== 'ready' || !heights) {
-    return <span className="fo-line" aria-hidden><i /></span>
+    return <span className="fo-line" aria-hidden><i ref={line} /></span>
   }
 
   const svgW = count * (WAVE_BAR + WAVE_GAP) - WAVE_GAP
   const svgH = WAVE_H + 4
-  const bars = (cls: string) => (
-    <g className={cls}>
+  const bars = (cls: string, position?: typeof playedBars) => (
+    <g className={cls} ref={position}>
       {heights.map((h, i) => <rect key={i} x={i * (WAVE_BAR + WAVE_GAP)} y={(svgH - h) / 2} width={WAVE_BAR} height={h} rx={1} />)}
     </g>
   )
@@ -134,9 +142,9 @@ const FoWave = memo(function FoWave({ onSeek }: { onSeek: (t: number) => void })
     >
       <svg width="100%" height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} preserveAspectRatio="none" aria-hidden>
         {bars('fo-wave-rest')}
-        {bars('fo-wave-played')}
+        {bars('fo-wave-played', playedBars)}
       </svg>
-      <i className="fo-wave-head" aria-hidden />
+      <i className="fo-wave-head" ref={playhead} aria-hidden />
     </div>
   )
 })
@@ -362,13 +370,8 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
     return () => { live = false }
   }, [pdf, chapter.number])
 
-  // The docked player steps aside while this is up; the bar's position is painted into this layer's own line.
-  useEffect(() => {
-    const el = root.current
-    const unshow = act.showFull()
-    const unpaint = el ? act.paintInto(el) : undefined
-    return () => { unshow(); unpaint?.() }
-  }, [act])
+  // The docked player steps aside while this is up. (The bar's position is painted by the bar's own elements, FoWave's.)
+  useEffect(() => act.showFull(), [act])
 
   // Focus goes in, and back to what opened it.
   useEffect(() => {
@@ -382,8 +385,8 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
   // Reset scroll state when the chapter changes so the first scroll is instant.
   useEffect(() => { scrollGoal.current = null; lastTop.current = -1 }, [chapter.number])
 
-  // Keep the highlighted element at ANCHOR of the scroller's visible height, using a per-frame
-  // lerp instead of CSS scroll-behavior so the text tracks the voice without the browser's
+  // Keep the highlighted element at ANCHOR of the scroller's visible height, gliding there by the clock
+  // (audiobookGlide.ts) instead of with CSS scroll-behavior, so the text tracks the voice without the browser's
   // uncontrollable smooth-scroll lag. First scroll is instant (the view is still fading in).
   const anchor = useCallback((el: HTMLElement) => {
     const box = scroller.current
@@ -402,15 +405,17 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
     scrollGoal.current = goal
     if (scrollFrame.current) return
 
-    const step = () => {
+    let before = performance.now()
+    const step = (now: number) => {
       const target = scrollGoal.current!
       const diff = target - box.scrollTop
-      if (Math.abs(diff) < 0.5) {
+      if (Math.abs(diff) < ARRIVED) {
         box.scrollTop = target
         scrollFrame.current = 0
         return
       }
-      box.scrollTop += diff * 0.2
+      box.scrollTop += glideBy(diff, now - before)
+      before = now
       scrollFrame.current = requestAnimationFrame(step)
     }
     scrollFrame.current = requestAnimationFrame(step)
@@ -418,7 +423,9 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
 
   const follow = useCallback(() => {
     lastTop.current = -1
-    const target = scroller.current?.querySelector<HTMLElement>('.fs.on, .fp.now')
+    // The sentence being read, or its paragraph where there are no sentences. (Not one selector for both: that
+    // returns whichever comes first in the page, and a paragraph comes before its own sentences.)
+    const target = scroller.current?.querySelector<HTMLElement>('.fs.on') ?? scroller.current?.querySelector<HTMLElement>('.fp.now')
     if (target) anchor(target)
   }, [anchor])
 
@@ -428,8 +435,20 @@ export function AudioFollow({ pdf, chapter, chapters, book, timing, onClose, onP
     const next = mode === 'lyrics' ? 'page' : 'lyrics'
     setMode(next)
     store.write(MODE_KEY, next)
-    follow()
-  }, [mode, follow])
+  }, [mode])
+
+  // A change of mode changes the size of the text, so where every line is. Aim again once the new layout is in
+  // place; in the click itself it is not yet, and the text was left far from the line being read.
+  useEffect(() => { follow() }, [mode, follow])
+
+  // The same when the window changes size, or a phone is turned over: the text reflows, so every line moves.
+  useEffect(() => {
+    const box = scroller.current
+    if (!box || typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(() => follow())
+    watch.observe(box)
+    return () => watch.disconnect()
+  }, [follow])
 
   // The paragraph being read: tracked outside React state so a change re-renders only the 2-4 paragraphs whose
   // place actually changes (via useSyncExternalStore in Paragraph), not the entire list.

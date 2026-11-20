@@ -1,14 +1,16 @@
 /*
  * The audio player: the full one under a file on the Audiobooks page, and the docked one that follows you
  * to every other page. Colours, radii, type sizes and every duration come from tokens; the tool's own
- * colour arrives as --pa (set on each player's root), the bar's position as --progress (written every
- * frame by the player engine), so nothing here re-renders to move.
+ * colour arrives as --pa (set on each player's root). The bar's position is written every frame by the player
+ * engine straight onto the elements that draw it (player/progress.ts): a fill's transform, a playhead's left, the
+ * played bars' mask. So nothing here re-renders to move, and nothing here depends on a variable (a custom property
+ * written sixty times a second makes the browser re-style everything inside the element it is written on).
+ * What these rules hold is the resting state, before the first frame.
  */
 
 .player, .mini {
   --pa-ink: color-mix(in srgb, var(--pa, var(--brand)) 64%, var(--ink));   /* the tool's colour, deep enough to read on a well */
   --pa-soft: color-mix(in srgb, var(--pa, var(--brand)) 20%, transparent);
-  --progress: 0;
 }
 
 /* ---- the full player ------------------------------------------------------------------------- */
@@ -87,23 +89,18 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
 .player-wave svg { display: block; overflow: visible; }
 .wave-rest rect { fill: color-mix(in srgb, var(--ink-3) 42%, transparent); }
 .wave-played rect { fill: var(--pa-ink); }
-/* soft 10px fade at the playhead boundary — blurs the edge rather than cutting it */
+/* Only what is played shows, with a soft fade at the playhead rather than a cut. The mask is written inline every
+ * frame (player/progress.ts, `played`); this is the resting state, nothing played yet. */
 .wave-played {
-  -webkit-mask-image: linear-gradient(to right,
-    black calc(var(--progress, 0) * 100% - 10px),
-    transparent calc(var(--progress, 0) * 100%)
-  );
-  mask-image: linear-gradient(to right,
-    black calc(var(--progress, 0) * 100% - 10px),
-    transparent calc(var(--progress, 0) * 100%)
-  );
+  -webkit-mask-image: linear-gradient(to right, transparent, transparent);
+  mask-image: linear-gradient(to right, transparent, transparent);
 }
 
 .playhead {
   position: absolute;
   top: -4px;
   bottom: -4px;
-  left: calc(var(--progress, 0) * 100%);
+  left: 0;                                /* written inline every frame (player/progress.ts, `head`) */
   width: 2px;
   margin-left: -1px;
   background: var(--ink);
@@ -149,7 +146,7 @@ button.plink:hover:not(:disabled) { background: transparent; color: var(--ink); 
 
 /* no waveform: a plain track (a file too big to draw, or a format this browser will not decode) */
 .wave-track { position: absolute; left: 0; right: 0; top: 50%; height: 6px; margin-top: -3px; background: var(--line-strong); border-radius: var(--r-pill); overflow: hidden; }
-.wave-track i { position: absolute; inset: 0; background: var(--pa-ink); border-radius: var(--r-pill); transform-origin: left; transform: scaleX(var(--progress, 0)); }
+.wave-track i { position: absolute; inset: 0; background: var(--pa-ink); border-radius: var(--r-pill); transform-origin: left; transform: scaleX(0); /* written inline every frame (player/progress.ts, `fill`) */ }
 /* the waveform on its way: bars that breathe, so the wait reads as work */
 .wave-loading { display: flex; align-items: center; gap: 4px; height: 100%; overflow: hidden; }
 .wave-loading i { flex: 1; min-width: 2px; height: var(--h); background: color-mix(in srgb, var(--ink-3) 42%, transparent); border-radius: 2px; animation: wave-breathe calc(var(--dur-3) * 3) ease-in-out infinite; animation-delay: var(--d); }
@@ -368,7 +365,7 @@ input.pvolume:focus-visible { outline: 2px solid var(--brand); outline-offset: 4
   animation: rise var(--dur-3) var(--ease);
 }
 .mini-line { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--line); pointer-events: none; }
-.mini-line i { position: absolute; inset: 0; background: var(--pa-ink); transform-origin: left; transform: scaleX(var(--progress, 0)); }
+.mini-line i { position: absolute; inset: 0; background: var(--pa-ink); transform-origin: left; transform: scaleX(0); /* written inline every frame (player/progress.ts, `fill`) */ }
 
 /* the title area is a button (it opens the page), dressed as plain content */
 button.mini-info {

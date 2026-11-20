@@ -1,9 +1,10 @@
 // The docked player: what keeps an audiobook in reach once you leave the Audiobooks page. It shows only
 // while something is loaded and no full player is on screen (the full one is the same player, bigger).
 
-import { useEffect, useRef, type CSSProperties } from 'react'
-import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock } from '../player/engine'
+import type { CSSProperties } from 'react'
+import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock, useProgressRef } from '../player/engine'
 import { clock, spoken } from '../player/format'
+import { fill } from '../player/progress'
 import { askToShow } from '../player/showing'
 import { IconAudiobooks, IconClose, IconForward, IconMeetings, IconPause, IconPlay, IconRewind } from './icons'
 import { toolColor } from '../charts/palette'
@@ -15,9 +16,7 @@ export function MiniPlayer({ go }: { go: (section: Section) => void }) {
   const { time, duration } = usePlayerClock()
   const act = usePlayerActions()
   const visible = track !== null && fullViews === 0
-  const root = useRef<HTMLDivElement>(null)
-
-  useEffect(() => (visible && root.current ? act.paintInto(root.current) : undefined), [act, visible])
+  const line = useProgressRef(fill)
 
   if (!track || !visible) return null
   const page = track.page ?? 'audiobooks'
@@ -31,13 +30,12 @@ export function MiniPlayer({ go }: { go: (section: Section) => void }) {
   return (
     <div
       className="mini"
-      ref={root}
       role="region"
       aria-label="Now playing"
       data-state={failed ? 'failed' : loading ? 'loading' : playing ? 'playing' : 'paused'}
       style={{ '--pa': toolColor(isMeeting ? 'meet-ai' : 'audiobook') } as CSSProperties}
     >
-      <span className="mini-line" aria-hidden><i /></span>
+      <span className="mini-line" aria-hidden><i ref={line} /></span>
       <button className="mini-info" onClick={show} title={where} aria-label={`${track.title}. ${where}`}>
         <span className="mini-tile" aria-hidden>
           {playing ? <span className="mini-eq"><i /><i /><i /></span> : isMeeting ? <IconMeetings size={17} strokeWidth={2} /> : <IconAudiobooks size={17} strokeWidth={2} />}

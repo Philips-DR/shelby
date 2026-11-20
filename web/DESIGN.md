@@ -122,8 +122,11 @@ Pages mount one at a time (`<main key={section}>`), so whatever a page owns dies
 audio player learned this the hard way: its `<audio>` lived in the Audiobooks panel and stopped the
 moment you opened another tab. It now lives in `PlayerProvider` (`main.tsx`, above `App`); the panel's
 `AudioPlayer` and the docked `MiniPlayer` are only views of it. A view re-renders only for what it shows
-(three contexts: slow state, the clock, actions), and the bar moves by writing `--progress` into the views'
-DOM nodes each frame. `--mini-h` (set while a file is loaded) keeps room at the foot of every page and
+(three contexts: slow state, the clock, actions), and the bar moves by writing ordinary inline properties (a
+fill's `transform`, a playhead's `left`, the played bars' `mask-image`: `player/progress.ts`) straight onto the few
+elements that draw it, only when it has moved enough to see. Never a CSS variable on a view: a custom property
+written on an element makes the browser re-style everything inside it (measured: about 23 ms of style work every
+frame when it was written on the follow-along layer). `--mini-h` (set while a file is loaded) keeps room at the foot of every page and
 shortens Chat, so the dock never covers the composer. Anything else that has to keep going across pages
 (an upload, a live stream) belongs in a provider up there too, never inside the page that started it.
 

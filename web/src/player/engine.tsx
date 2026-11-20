@@ -5,11 +5,13 @@
 //
 // Three contexts, so a view re-renders only for what it shows: the slow state (what is loaded, playing or
 // not, speed, volume, the sleep timer), the clock (the time, four times a second), and the actions (which
-// never change). The bar itself moves through a CSS variable written to the views' DOM nodes every
-// animation frame, so sixty updates a second re-render nothing.
+// never change). The bar itself moves by writing, every animation frame, to the few elements that draw it
+// (`useProgressRef`, progress.ts), so sixty updates a second re-render nothing. What is written is an ordinary
+// inline property on exactly those elements -- see progress.ts for why it is not a CSS variable on the view.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CONTINUE_KEY, PREFETCH_SECONDS, continuesFrom } from './queue'
+import type { Painter } from './progress'
 import { numeric, store } from './storage'
 import type { Section } from '../ui/sections'
 import { useWaveform, type Wave } from './waveform'
@@ -64,8 +66,8 @@ interface PlayerActions {
   dismissResume(): void
   /** A view is dragging the bar: leave it alone until it lets go. */
   scrub(on: boolean): void
-  /** Have `el`'s --progress kept current. Returns the undo. */
-  paintInto(el: HTMLElement): () => void
+  /** Have `paint` called with the fraction played (0..1) now and every frame the bar moves. Returns the undo. */
+  paintWith(paint: (fraction: number) => void): () => void
   /** Tell the player a full view is on screen. Returns the undo. */
   showFull(): () => void
 }
@@ -82,9 +84,19 @@ export const usePlayer = () => need(useContext(StateContext))
 export const usePlayerClock = () => need(useContext(ClockContext))
 export const usePlayerActions = () => need(useContext(ActionsContext))
 
+/** A ref for an element that draws the playing position (a bar's fill, a playhead): `how` (progress.ts) is called on it
+ *  with the fraction played for as long as it is on the page, and let go of when it is not. `how` must be a stable
+ *  function (one of progress.ts's, made once), or the element is re-registered on every render. */
+export function useProgressRef<T extends HTMLElement | SVGElement>(how: Painter<T>) {
+  const act = usePlayerActions()
+  return useCallback((el: T | null) => (el ? act.paintWith((fraction) => how(el, fraction)) : undefined), [act, how])
+}
+
 const positionKey = (key: string) => `assistant-player:${key}`
 const lengthOf = (el: HTMLAudioElement, fallback: number) => (Number.isFinite(el.duration) && el.duration > 0 ? el.duration : fallback)
 const SAVE_EVERY_MS = 4000
+/** The least the bar moves between two frame-by-frame repaints: a quarter of a pixel on a wide bar, too little to see. */
+const PAINT_STEP = 1 / 4000
 const FADE_MS = 3500
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
@@ -115,13 +127,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   waveSeconds.current = wave.seconds
   const dragging = useRef(false)
 
-  // ---- the progress variable, painted straight into the views' DOM nodes
-  const targets = useRef(new Set<HTMLElement>())
+  // ---- the bar's position, painted straight into the elements that draw it
+  const targets = useRef(new Set<(fraction: number) => void>())
   const progress = useRef(0)
   const dur = useCallback((el: HTMLAudioElement) => lengthOf(el, waveSeconds.current), [])
-  const paint = useCallback((t: number, d: number) => {
-    progress.current = d > 0 ? Math.min(1, Math.max(0, t / d)) : 0
-    for (const el of targets.current) el.style.setProperty('--progress', String(progress.current))
+  const painted = useRef(-1)
+  /** Move the bar to `t` of `d` seconds. The frame-by-frame tick passes `onlyIfMoved`: a bar a long chapter wide moves
+   *  a thousandth of a pixel in a frame, and repainting it sixty times a second for nothing (the played bars' mask is
+   *  re-drawn each time) cost the follow-along view about 20 frames a second in headless Chrome (29 against 49).
+   *  Anything else (a seek, a pause, a new file) is exact. */
+  const paint = useCallback((t: number, d: number, onlyIfMoved = false) => {
+    const at = d > 0 ? Math.min(1, Math.max(0, t / d)) : 0
+    progress.current = at
+    if (onlyIfMoved && Math.abs(at - painted.current) < PAINT_STEP) return
+    painted.current = at
+    for (const painter of targets.current) painter(at)
   }, [])
 
   // ---- remembering where you stopped
@@ -232,7 +252,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     let frame = 0
     const tick = () => {
       const el = audio.current
-      if (el && !dragging.current) paint(el.currentTime, dur(el))
+      if (el && !dragging.current) paint(el.currentTime, dur(el), true)
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
@@ -349,10 +369,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       },
       dismissResume: () => setResumed(null),
       scrub(on) { dragging.current = on },
-      paintInto(el) {
-        targets.current.add(el)
-        el.style.setProperty('--progress', String(progress.current))
-        return () => { targets.current.delete(el) }
+      paintWith(painter) {
+        targets.current.add(painter)
+        painter(progress.current)
+        return () => { targets.current.delete(painter) }
       },
       showFull() {
         setFullViews((n) => n + 1)

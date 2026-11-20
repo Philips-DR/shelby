@@ -13,8 +13,9 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { useWidth } from '../charts/useWidth'
-import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock } from '../player/engine'
+import { BACK, FORWARD, usePlayer, usePlayerActions, usePlayerClock, useProgressRef } from '../player/engine'
 import { clock, spoken } from '../player/format'
+import { fill, head, played } from '../player/progress'
 import { WAVE_BUCKETS } from '../player/waveform'
 import { IconClose, IconForward, IconMoon, IconMuted, IconNext, IconPause, IconPlay, IconPrevious, IconRewind, IconVolume } from './icons'
 import { toolColor } from '../charts/palette'
@@ -24,6 +25,9 @@ const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2]
 const SLEEPS = [5, 10, 15, 30, 45, 60]
 const BAR = 3
 const GAP = 2
+/** The played bars fade out over this many pixels at the playhead, so the edge is soft. */
+const PLAYED_FADE = 10
+const paintPlayed = played(PLAYED_FADE)
 
 // ---- a small menu (speed, sleep) --------------------------------------------------------------------------
 
@@ -73,6 +77,9 @@ export function AudioPlayer({ onClose, onTap }: { onClose?: () => void; onTap?: 
   const { track, playing, waiting, failed, rate, volume, muted, resumed, sleep, wave, continues, notice } = usePlayer()
   const { time, duration, sleepLeft } = usePlayerClock()
   const act = usePlayerActions()
+  const trackFill = useProgressRef(fill)
+  const playedBars = useProgressRef(paintPlayed)
+  const playhead = useProgressRef(head)
   const root = useRef<HTMLDivElement>(null)
   const [waveBox, width] = useWidth<HTMLDivElement>(560)
   const [remaining, setRemaining] = useState(false)
@@ -80,20 +87,20 @@ export function AudioPlayer({ onClose, onTap }: { onClose?: () => void; onTap?: 
   const dragging = useRef(false)
   const sought = useRef(false)
 
-  // Keep the bar current, and tell the docked player to step aside while this one is actually in view. It
-  // counts as in view from the start (so the dock never flashes up as this one opens), and stops counting if
-  // it turns out to be hidden (inside a collapsed group) or scrolled down into the band the dock covers.
+  // Tell the docked player to step aside while this one is actually in view. It counts as in view from the start
+  // (so the dock never flashes up as this one opens), and stops counting if it turns out to be hidden (inside a
+  // collapsed group) or scrolled down into the band the dock covers. (The bar's position is painted by the bar's
+  // own elements, below.)
   useEffect(() => {
     const el = root.current
     if (!el) return
-    const unpaint = act.paintInto(el)
     let unshow: (() => void) | null = act.showFull()
     const watch = new IntersectionObserver(([entry]) => {
       if (entry?.isIntersecting && !unshow) unshow = act.showFull()
       else if (!entry?.isIntersecting && unshow) { unshow(); unshow = null }
     }, { rootMargin: '0px 0px -160px 0px' })
     watch.observe(el)
-    return () => { watch.disconnect(); unpaint(); unshow?.() }
+    return () => { watch.disconnect(); unshow?.() }
   }, [act])
 
   // ---- pointer and keyboard on the seek bar
@@ -141,8 +148,8 @@ export function AudioPlayer({ onClose, onTap }: { onClose?: () => void; onTap?: 
       return Math.max(3, Math.round(peak * 56))
     })
   }, [wave, count])
-  const bars = (className: string) => (
-    <g className={className}>
+  const bars = (className: string, position?: typeof playedBars) => (
+    <g className={className} ref={position}>
       {heights?.map((h, i) => <rect key={i} x={i * (BAR + GAP)} y={32 - h / 2} width={BAR} height={h} rx={1.5} />)}
     </g>
   )
@@ -208,16 +215,16 @@ export function AudioPlayer({ onClose, onTap }: { onClose?: () => void; onTap?: 
             {wave.state === 'ready' && heights ? (
               <svg width="100%" height="64" viewBox={`0 0 ${count * (BAR + GAP) - GAP} 64`} preserveAspectRatio="none" aria-hidden>
                 {bars('wave-rest')}
-                {bars('wave-played')}
+                {bars('wave-played', playedBars)}
               </svg>
             ) : wave.state === 'loading' ? (
               <div className="wave-loading" aria-hidden>
                 {Array.from({ length: 48 }, (_, i) => <i key={i} style={{ '--h': `${18 + ((i * 37) % 40)}%`, '--d': `${i * 24}ms` } as CSSProperties} />)}
               </div>
             ) : (
-              <div className="wave-track" aria-hidden><i /></div>
+              <div className="wave-track" aria-hidden><i ref={trackFill} /></div>
             )}
-            <i className="playhead" aria-hidden />
+            <i className="playhead" ref={playhead} aria-hidden />
             {hover !== null && <i className="hoverline" style={{ '--x': `${hover * 100}%` } as CSSProperties} aria-hidden />}
             {hoverTime !== null && <span className="hovertime" style={{ '--x': `${hover! * 100}%` } as CSSProperties} aria-hidden>{clock(hoverTime)}</span>}
           </div>
