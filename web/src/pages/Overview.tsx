@@ -4,7 +4,7 @@
 // beside it to that day, and says so.
 
 import { useMemo, useState, type CSSProperties } from 'react'
-import { getHistory, getStatus, toolLabel as qualifiedLabel } from '../api'
+import { getHistory, getStatus, getUsage, toolLabel as qualifiedLabel } from '../api'
 import { ChartCard, DataTable } from '../charts/ChartCard'
 import { HBars } from '../charts/HBars'
 import { toolColor, toolName as displayTool, TOOLS, toolOf } from '../charts/palette'
@@ -22,6 +22,7 @@ import { TOOL_ICON, TOOL_SECTION } from '../ui/toolMeta'
 import { ago, clock } from '../ui/time'
 import { usePoll, fileName } from '../usePoll'
 import { change, columns, dayKey, medianByTool, period, seriesFor, summarise, type Row } from './overviewData'
+import { bySource, costCell, formatUsd, priceNote, tokens, usagePeriod, usageTable } from './usageData'
 import { useLiveJobs } from './useLiveJobs'
 
 const RANGES = [7, 14, 30]
@@ -205,6 +206,7 @@ export function Overview({ go }: { go: (to: Section) => void }) {
   const [day, setDay] = useState<string | null>(null)
   const history = usePoll(() => getHistory(2000), 30000)
   const status = usePoll(() => getStatus(false), 30000)
+  const usage = usePoll(() => getUsage(5000), 30000)
 
   const loaded = history.data !== null
   const rows = useMemo(() => (history.data ?? []) as Row[], [history.data])
@@ -226,6 +228,15 @@ export function Overview({ go }: { go: (to: Section) => void }) {
   const slow = medianByTool(scoped)
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
   const rangeLabel = `the last ${range} days`
+
+  // Model usage: every request to a model the assistant counted, in the viewer's own local days.
+  const usageLoaded = usage.data !== null
+  const u = useMemo(() => usagePeriod(usage.data?.rows ?? [], range), [usage.data, range])
+  const sources = useMemo(() => bySource(u.rows), [u.rows])
+  const note = usageLoaded && u.current.calls > 0 ? <p className="hint">{priceNote(u.rows, usage.data!.prices_as_of, u.current.unpriced)}</p> : null
+  const countedSince = usage.data?.complete && usage.data.since
+    ? new Date(usage.data.since).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })
+    : null
 
   return (
     <>
@@ -286,6 +297,47 @@ export function Overview({ go }: { go: (to: Section) => void }) {
           </ChartCard>
         </div>
       </div>
+
+      <h2 className="section-title">Model usage</h2>
+      {usage.error && !usageLoaded ? (
+        <div className="card"><div className="empty compact"><strong>Usage could not be loaded</strong><span>{usage.error}</span></div></div>
+      ) : (
+        <>
+          <div className="kpis stagger">
+            <Stat index={0} hero label={`Model cost, ${rangeLabel}`} value={usageLoaded ? u.current.cost : null} format={formatUsd}
+              deltaText={usageLoaded ? `${arrow(change(u.current.cost, u.before.cost))} vs the ${range} days before` : undefined}
+              spark={u.dailyCost} sparkLabel={`Estimated model cost per day over ${rangeLabel}`} />
+            <Stat index={1} label="Tokens in" value={usageLoaded ? u.current.input : null} format={(n) => tokens(Math.round(n))}
+              deltaText={usageLoaded ? arrow(change(u.current.input, u.before.input)) : undefined} />
+            <Stat index={2} label="Tokens out" value={usageLoaded ? u.current.output : null} format={(n) => tokens(Math.round(n))}
+              deltaText={usageLoaded ? arrow(change(u.current.output, u.before.output)) : undefined} />
+            <Stat index={3} label="Model calls" value={usageLoaded ? u.current.calls : null}
+              deltaText={usageLoaded ? arrow(change(u.current.calls, u.before.calls)) : undefined} />
+          </div>
+
+          <ChartCard
+            className="section-gap"
+            title="Where the cost came from"
+            sub={`Estimated cost by source, over ${rangeLabel}.${countedSince ? ` Counting began on ${countedSince}; nothing earlier was recorded.` : ''}`}
+            table={<>
+              <DataTable head={['Source', 'Calls', 'Tokens in', 'Tokens out', 'Estimated cost']}
+                rows={sources.map((s) => [s.label, s.calls, s.input.toLocaleString(), s.output.toLocaleString(), costCell(s)])} />
+              <DataTable head={['Day', 'Calls', 'Tokens in', 'Tokens out', 'Estimated cost']} rows={usageTable(u.days, u.daily)} />
+              {note}
+            </>}
+          >
+            {sources.length === 0 ? (
+              <div className="empty compact"><strong>{usageLoaded ? 'No model calls counted in this period' : 'Loading'}</strong><span>Chat answers and meeting notes show here once they have used the model.</span></div>
+            ) : (
+              // In cents, because HBars scales from at least 1 (counts, milliseconds): a day's spend of $0.05 must not draw as nothing.
+              // The extra room past the longest bar is for a value like "$11.42" in a narrow phone-width track.
+              <HBars label={`Estimated model cost by source over ${rangeLabel}`} max={Math.max(...sources.map((s) => s.cost * 100)) * 1.3}
+                items={sources.map((s) => ({ key: s.key, label: s.label, value: s.cost * 100, display: s.unpriced === s.calls ? 'No price' : formatUsd(s.cost), sub: `${s.calls} calls, ${tokens(s.input)} in, ${tokens(s.output)} out`, color: s.color }))} />
+            )}
+            {note}
+          </ChartCard>
+        </>
+      )}
 
       <h2 className="section-title">Your tools</h2>
       <ToolRows rows={p.rows} days={p.days} go={go} levels={levels} />

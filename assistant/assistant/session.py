@@ -17,6 +17,7 @@ from assistant.approval import Asker, approve, needs_approval
 from assistant.audit import AuditStore
 from assistant.config import ANTHROPIC, ModelConfig
 from assistant.tools import RemoteTool, ToolRegistry
+from assistant.usage import UsageStore, count_response, count_result
 
 MAX_TOKENS = 16000
 
@@ -143,8 +144,12 @@ async def execute(
     gate: Gate,
     emit: EventSink = _discard,
     origin: str = "chat",
+    usage: UsageStore | None = None,
 ) -> tuple[str, str]:
     """Preview, gate, call, audit -- for one tool call. Returns (output, outcome).
+
+    `usage`, when given, also records the tokens a tool reports having spent on a model (`usage.py`):
+    meet-ai's notes and minutes, whether the model asked for them or a button did.
 
     The single path every call takes, whether a model asked for it or a person pressed a
     button. Two paths would drift: the button one would quietly lose the audit row, or the
@@ -199,6 +204,8 @@ async def execute(
             result=output,
             origin=origin,
         )
+    if outcome == "ok":
+        await count_result(usage, tool.qualified_name, output)
     await emit({"type": "tool_finished", "tool": tool.qualified_name, "outcome": outcome,
                 "result": output[:2000], "origin": origin, "read_only": tool.read_only})
     return output, outcome
@@ -214,8 +221,12 @@ async def run_turn(
     gate: Gate | None = None,
     emit: EventSink = _discard,
     stop: asyncio.Event | None = None,
+    usage: UsageStore | None = None,
 ) -> str:
     """One user request, through as many tool calls as it takes. Mutates `messages`.
+
+    `usage`, when given, is told what every request to the model took, as it comes back. A request
+    stopped before its answer arrives is not counted: its figures never reach us.
 
     `gate` decides approvals; without one, a terminal prompt built from `ask` does. `emit`
     receives each step as it happens, which is how a browser watches a turn unfold.
@@ -252,6 +263,7 @@ async def run_turn(
                 asked.cancel()
                 return await _stopped(messages, emit)
         response = await asked
+        await count_response(usage, config, response)
 
         # The whole content list, not just the text: thinking and tool_use blocks have to
         # travel back unchanged or the next turn loses the model's own reasoning.
@@ -286,7 +298,7 @@ async def run_turn(
                 continue
 
             output, outcome = await execute(
-                registry, tool, dict(block.input or {}), audit, gate, emit
+                registry, tool, dict(block.input or {}), audit, gate, emit, usage=usage
             )
             results.append({
                 "type": "tool_result",

@@ -243,6 +243,28 @@ export interface AuditRow {
 
 export const getHistory = (limit = 200) => request<AuditRow[]>(`/api/history?limit=${limit}`)
 
+/** One request to a model, counted by the backend. `cost_usd` is an estimate at Anthropic's list prices, and null for a model with no listed price. */
+export interface UsageRow {
+  at: string
+  /** `chat`, or the tool whose result reported it (`meet_ai__generate_notes`). */
+  source: string
+  model: string
+  provider: string
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number | null
+}
+
+export interface Usage {
+  rows: UsageRow[]
+  /** The oldest row returned; counting began then when `complete` (nothing before it was ever recorded). */
+  since: string | null
+  complete: boolean
+  prices_as_of: string
+}
+
+export const getUsage = (limit = 5000) => request<Usage>(`/api/usage?limit=${limit}`)
+
 export type Level = 'ok' | 'warning' | 'error'
 /** What a tool's own check of its login found: ok; dead (refused, sign in again); missing (never signed in); unknown (could not tell). */
 export type LoginState = 'ok' | 'dead' | 'missing' | 'unknown'

@@ -212,7 +212,8 @@ def test_migrations_apply_once_in_order_and_a_failing_one_leaves_nothing_behind(
     assert first == ["001_a.sql", "002_b.sql"] and again == []
     assert c_exists is False  # the failed file was rolled back whole
     assert recorded == ["001_a.sql", "001_initial.sql", "002_b.sql", "002_files.sql", "003_file_texts.sql",
-                        "004_records.sql", "005_conversations.sql", "006_conversation_messages.sql"]
+                        "004_records.sql", "005_conversations.sql", "006_conversation_messages.sql",
+                        "007_model_usage.sql"]
 
 
 @needs_postgres
@@ -284,6 +285,41 @@ def test_the_audit_log_in_the_database_reads_back_as_the_file_does(tmp_path):
     assert pg_recent[1]["origin"] == "chat" and "duration_ms" not in pg_recent[1]
     assert {s: r["outcome"] for s, r in pg_last.items()} == {s: r["outcome"] for s, r in file_last.items()}
     assert datetime.fromisoformat(pg_recent[0]["at"]).utcoffset().total_seconds() == 0
+
+
+@needs_postgres
+def test_model_usage_in_the_database_reads_back_as_the_file_does_and_refuses_what_makes_no_sense(tmp_path):
+    from assistant.usage import FileUsageStore, PgUsageStore
+
+    good = dict(model="claude-opus-5-5", provider="anthropic")
+
+    async def scenario(store):
+        await store.record(source="chat", input_tokens=100, output_tokens=40, **good)
+        await store.record(source="meet_ai__generate_notes", input_tokens=18_000, output_tokens=3_000, **good)
+        await store.record(source="chat", input_tokens=-5, output_tokens=1, **good)  # never raises, never stored
+        return await store.recent(10), await store.recent(1)
+
+    async def against_the_database():
+        async with scratch_database() as url:
+            async with Database(url) as database:
+                rows = await scenario(PgUsageStore(database))
+                broken = PgUsageStore(database)
+            # the database has gone away: counting must not break the work, and reading says nothing
+            await broken.record(source="chat", input_tokens=1, output_tokens=1, **good)
+            return rows, await broken.recent(10)
+
+    file_rows, file_newest = run(scenario(FileUsageStore(tmp_path / "usage.jsonl")))
+    (pg_rows, pg_newest), after = run(against_the_database())
+
+    def shape(rows):  # what each row says, without the clock
+        return [{k: v for k, v in r.items() if k != "at"} for r in rows]
+
+    # The file keeps the bad row (it checks nothing); the table refuses it. Everything else reads back alike.
+    assert shape(pg_rows) == [r for r in shape(file_rows) if r["input_tokens"] >= 0]
+    assert [r["input_tokens"] for r in pg_rows] == [18_000, 100]  # newest first
+    assert [r["input_tokens"] for r in pg_newest] == [18_000]
+    assert datetime.fromisoformat(pg_rows[0]["at"]).utcoffset().total_seconds() == 0
+    assert after == []
 
 
 @needs_postgres

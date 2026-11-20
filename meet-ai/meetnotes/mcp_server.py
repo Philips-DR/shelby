@@ -42,6 +42,7 @@ from meetnotes.operations import (
     stop_recording,
     transcribe_audio,
     transcription_status,
+    with_model_usage,
 )
 
 VERSION = "0.1.0"
@@ -176,7 +177,7 @@ def create_meet_ai_server(paths: ServerPaths, config: ModelConfig, dictation: Di
     )
     def _generate_notes(timeline: str, lexicon: str | None = None, effort: str = "high") -> dict:
         try:
-            return as_dict(
+            return with_model_usage(
                 generate_notes(
                     locate(timeline),
                     config,
@@ -225,7 +226,7 @@ def create_meet_ai_server(paths: ServerPaths, config: ModelConfig, dictation: Di
     def _generate_minutes(timeline: str, lexicon: str | None = None,
                           effort: str | None = None) -> dict:
         try:
-            return as_dict(
+            return with_model_usage(
                 generate_minutes(
                     locate(timeline), config,
                     lexicon_path=Path(lexicon) if lexicon else None, effort=effort,

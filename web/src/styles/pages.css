@@ -10,6 +10,7 @@
 .section-title { margin: 30px 0 14px; font-family: var(--font-display); font-size: var(--fs-xl); letter-spacing: -0.02em; }
 .section-gap { margin-top: 16px; }
 
+.chartcard > .hint { margin: 14px 0 0; }
 .empty.compact { padding: 22px 8px; }
 .empty.compact span { max-width: 34ch; font-size: var(--fs-sm); }
 

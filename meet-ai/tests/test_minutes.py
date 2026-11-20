@@ -166,3 +166,55 @@ def test_a_model_that_thinks_past_its_budget_fails_clearly(monkeypatch, tmp_path
 def test_minutes_default_to_a_lower_effort_than_notes():
     from meetnotes.extract import MINUTES_EFFORT
     assert MINUTES_EFFORT == "medium"
+
+
+def test_a_minutes_result_says_what_the_call_took_for_whoever_adds_up_the_cost(monkeypatch, tmp_path):
+    """The assistant's Overview prices model calls from one agreed key, `model_usage`, in a result. It needs
+    the input tokens too (the result carried only the output), the model, and which provider answered."""
+    import json
+    from dataclasses import asdict
+    from types import SimpleNamespace as NS
+    import meetnotes.extract as extract
+    from meetnotes.client import ModelConfig
+    from meetnotes.operations import generate_minutes, with_model_usage
+
+    answer = NS(type="text", text=json.dumps(asdict(raw())))
+    message = NS(content=[answer], stop_reason="end_turn", usage=NS(input_tokens=1234, output_tokens=567))
+    monkeypatch.setattr(extract, "build_client",
+                        lambda config: NS(messages=NS(stream=lambda **kwargs: _FakeStream(message))))
+    timeline = tmp_path / "m.timeline.json"
+    timeline.write_text(json.dumps({"version": 1, "source": "m.m4a", "duration": 10.0, "segments": SEGMENTS}))
+    config = ModelConfig(region="us-east-1")
+
+    result = generate_minutes(timeline, config)
+
+    assert (result.input_tokens, result.output_tokens, result.provider) == (1234, 567, config.provider)
+    door = with_model_usage(result)
+    assert door["model_usage"] == {"model": config.resolved_model, "provider": config.provider,
+                                   "input_tokens": 1234, "output_tokens": 567}
+    # Everything the door returned before is still there, unchanged.
+    assert door["markdown"] == result.markdown and door["verified_claims"] == result.verified_claims
+
+
+def test_a_notes_result_says_what_the_call_took_too(monkeypatch, tmp_path):
+    import json
+    from types import SimpleNamespace as NS
+    import meetnotes.extract as extract
+    from meetnotes.client import ModelConfig
+    from meetnotes.operations import generate_notes, with_model_usage
+
+    answer = NS(type="text", text=json.dumps({
+        "summary": "Claims are slow.", "decisions": [], "questions": [],
+        "actions": [claim("Write to the authority.", "please write to the authority", "Jonah")]}))
+    message = NS(content=[answer], stop_reason="end_turn", usage=NS(input_tokens=4321, output_tokens=765))
+    monkeypatch.setattr(extract, "build_client",
+                        lambda config: NS(messages=NS(stream=lambda **kwargs: _FakeStream(message))))
+    timeline = tmp_path / "m.timeline.json"
+    timeline.write_text(json.dumps({"version": 1, "source": "m.m4a", "duration": 10.0, "segments": SEGMENTS}))
+    config = ModelConfig(region="us-east-1")
+
+    door = with_model_usage(generate_notes(timeline, config))
+
+    assert door["model_usage"] == {"model": config.resolved_model, "provider": config.provider,
+                                   "input_tokens": 4321, "output_tokens": 765}
+    assert door["actions"] == 1  # the rest of the result is as it was

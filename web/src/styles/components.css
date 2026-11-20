@@ -165,7 +165,8 @@
 .stat-value { font-size: 2.125rem; font-weight: 650; line-height: 1.05; letter-spacing: -0.035em; }
 .stat.hero .stat-value { font-size: var(--fs-hero); }
 .stat-value small { font-size: 0.5em; font-weight: 600; color: var(--ink-3); letter-spacing: 0; margin-left: 4px; }
-.stat-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.stat-foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.stat-foot .spark { margin-left: auto; }
 .stat-delta { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 650; color: var(--ink-3); }
 .stat-delta.good { color: var(--ok); }
 .stat-delta.bad { color: var(--bad); }

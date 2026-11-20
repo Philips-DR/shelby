@@ -301,6 +301,12 @@ ever run against the API, there being no key), and `SHELBY_MODEL` in `.env` (or 
 code change. The notes and minutes call uses `thinking` and `output_config` (effort, JSON schema), which are Anthropic's; a provider
 that is not Anthropic would need an adapter here and in the assistant, and is not built (an Anthropic key is enough for now).
 
+**Saying what a model call took (2026-11-20).** `generate_notes` and `generate_minutes` results carry `input_tokens` and
+`provider` as well as `output_tokens` and `model`, and the MCP door adds one key, `model_usage` (`with_model_usage`:
+`{model, provider, input_tokens, output_tokens}`). The assistant adds up model cost for its Overview from that key and
+nothing else of this tool's; run alone, nothing reads it. `input_tokens` is what was not served from a cache (this tool
+asks for no caching) and `output_tokens` includes thinking. A call that fails reports none. Tested in `tests/test_minutes.py`.
+
 ## Layer 4 is deterministic on purpose
 
 The plan reserved it as a model seam; it is a dictionary substitution instead. A lexicon lookup is

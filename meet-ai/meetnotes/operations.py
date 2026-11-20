@@ -331,6 +331,9 @@ class NotesResult:
     effort: str = ""
     output_tokens: int = 0
     seconds: float = 0.0
+    # What the call took, for whoever adds up the cost (the assistant's Overview): see `with_model_usage`.
+    input_tokens: int = 0
+    provider: str = ""
 
 
 def generate_notes(timeline_path: Path, config: ModelConfig, out_dir: Path | None = None,
@@ -383,6 +386,8 @@ def generate_notes(timeline_path: Path, config: ModelConfig, out_dir: Path | Non
         effort=effort,
         output_tokens=usage.output_tokens,
         seconds=usage.seconds,
+        input_tokens=usage.input_tokens,
+        provider=config.provider,
     )
 
 
@@ -411,6 +416,8 @@ class MinutesResult:
     effort: str
     output_tokens: int
     seconds: float
+    input_tokens: int = 0
+    provider: str = ""
 
 
 def generate_minutes(timeline_path: Path, config: ModelConfig, out_dir: Path | None = None,
@@ -456,6 +463,8 @@ def generate_minutes(timeline_path: Path, config: ModelConfig, out_dir: Path | N
         effort=effort,
         output_tokens=usage.output_tokens,
         seconds=usage.seconds,
+        input_tokens=usage.input_tokens,
+        provider=config.provider,
     )
 
 
@@ -732,6 +741,16 @@ def transcribe_audio(audio_path: Path, out_dir: Path, diarize: bool = False,
 def as_dict(value: object) -> dict:
     """Dataclass to plain JSON-able dict, for a door that returns JSON."""
     return asdict(value)  # type: ignore[arg-type]
+
+
+def with_model_usage(result: NotesResult | MinutesResult) -> dict:
+    """`as_dict`, plus the one key a caller that adds up model cost looks for: `model_usage`, naming the model
+    and provider and what the call took. Only the key and its four fields are agreed with the assistant, which
+    records them without knowing anything else of this tool; run alone, nothing reads it. `input_tokens` is
+    what was not served from a cache (this tool asks for no caching) and `output_tokens` includes thinking."""
+    return {**as_dict(result), "model_usage": {
+        "model": result.model, "provider": result.provider,
+        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens}}
 
 
 # ---------------------------------------------------------------------------

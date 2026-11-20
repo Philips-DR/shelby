@@ -476,6 +476,46 @@ Google Docs `ok`, with the service names the tools gave. Then a second copy with
 issued and the Docs token absent: Google's own `invalid_grant` came back as `dead` and the missing file as `missing`, and the page
 showed three things signed out with one `./auth`. The real tokens were never touched.
 
+## Model usage and price (`usage.py`, `007_model_usage.sql`, 2026-11-20)
+
+The Overview's "Model usage" section (tokens in and out, calls, estimated cost, by source) is drawn from one row per
+request to a model. **Nothing was recorded before 2026-11-20**, so it counts from the day it was deployed and says so
+(`since`, only when `complete`).
+
+- **Two things reach it.** Chat steps are counted where the answer comes back (`run_turn`, from `response.usage`,
+  source `chat`). A tool that calls a model itself says so in its result under one agreed key, `model_usage`
+  (`{model, provider, input_tokens, output_tokens}`), and `execute` records it (`count_result`, source = the tool's
+  qualified name). Only the key and its four fields are agreed, like `login_status`; the assistant learns nothing else
+  of the tool, and a tool run alone never reads it. meet-ai's `generate_notes` and `generate_minutes` are the only two.
+  Because `execute` is the one path, a button press counts the same as chat.
+- **A tool's report is untrusted.** `usage_from_result` takes it only when it is exactly a model, a provider and two
+  whole token counts (no bool, float, string or negative) and stores those four fields and nothing else.
+  A failed call, or a result without the key, counts nothing.
+- **Tokens are stored, dollars are not.** `cost_usd` is worked out when `GET /api/usage` is read, from `PRICES` in
+  `usage.py`, so a corrected price fixes the past. `PRICES` holds Anthropic's own list prices from the model list the
+  claude-api reference carried on 2026-11-03 (input and output per million tokens), for the Opus, Sonnet and Fable
+  models listed there. **A model not in the table is counted in tokens and shown with no price, never a guessed one**
+  (Haiku is left out on purpose: its price depends on prompt size). `price_key` maps Bedrock's names
+  (`us.anthropic.claude-opus-4-6-v1`) to the first-party id.
+- **It is an estimate, and the page says so**: list prices, not a bill; Amazon Bedrock bills a model itself and may
+  differ (the Bedrock route ends at the end of November 2026); no cache tokens, because neither this chat loop nor
+  meet-ai asks for caching (add a column and a price if that changes). New models or price changes are an edit to
+  `PRICES` and `PRICES_AS_OF`, nothing else.
+- **The endpoint returns rows, not totals** (`GET /api/usage?limit=5000`, newest first, the same token guard), and the
+  page groups them into the viewer's own local days (`web/src/pages/usageData.ts`, tested), as it does the audit log.
+  `complete` is false when the limit cut the list short; the page then does not claim when counting began.
+- **Stores follow the audit log's rules**: `FileUsageStore` (`usage.jsonl` beside the audit file) or `PgUsageStore`
+  (`model_usage`, constraints refuse negative counts); `record` never raises, reads that fail return nothing.
+- **Known gaps (an undercount, never an overcount):** a chat request the user stopped before its answer arrived is
+  not counted (its figures never reach us); a meet-ai call that fails (`ModelOutOfRoom`, which can spend the whole
+  32,000-token output budget) returns no `model_usage`; meet-ai or the terminal chat (`cli.py`) run on their own are
+  not counted; the Hub's other model use, if any is added, must pass `usage=`.
+- **Run for real (2026-11-20):** migration 007 applied to the real database; one real call through `run_turn` (Sonnet
+  5.5 through the API key, "Reply with the single word: ok") came back as 760 tokens in and 4 out, was written to the
+  real table, served by `/api/usage` and shown on the live Overview as `<$0.01`. That row is real and stays. The
+  populated page was checked on seeded rows (a stand-in answering `/api/usage`; nothing seeded in the real table):
+  20 width and theme combinations, no overflow, axe clean, the empty and "could not be loaded" states, and the table view.
+
 ## On a timer (`schedule.py`, 2026-10-30)
 
 A tool's entry in `tools.yaml` may say `schedule: [{tool: sync, every_minutes: 30}]`, and the server runs that

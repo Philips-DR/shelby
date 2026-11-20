@@ -59,6 +59,7 @@ from assistant.logins import Logins
 from assistant.status import model_failure, network_status, tools_status
 from assistant.tools import RemoteTool, ToolRegistry
 from assistant.schedule import run_every
+from assistant.usage import PRICES_AS_OF, UsageStore, priced, usage_for, usage_path_for
 from assistant.watchers import watch, watch_login
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,7 +138,8 @@ class Hub:
 
     def __init__(self, registry: ToolRegistry, config: Any, context: str, audit: AuditStore,
                  refresh_context: Callable[[], Awaitable[str]] | None = None,
-                 conversations: ConversationStore | NullConversationStore | None = None) -> None:
+                 conversations: ConversationStore | NullConversationStore | None = None,
+                 usage: UsageStore | None = None) -> None:
         self.registry = registry
         self.config = config
         self.context = context
@@ -145,6 +147,8 @@ class Hub:
         # corrected -- must reach the model on the next turn, not after a restart.
         self.refresh_context = refresh_context
         self.audit = audit
+        # What each request to a model took (usage.py); None counts nothing.
+        self.usage = usage
         self.conversations = conversations or NullConversationStore()
         self.conversation_id: str | None = None
         self.conversation_title: str = ""
@@ -227,7 +231,8 @@ class Hub:
         self.stop = asyncio.Event()
         try:
             await run_turn(self.registry, self.config, self.messages, self.audit,
-                           context=self.context, gate=self.web_gate, emit=self.emit, stop=self.stop)
+                           context=self.context, gate=self.web_gate, emit=self.emit, stop=self.stop,
+                           usage=self.usage)
         except Exception as error:
             # A failed turn can leave a tool call without its result, which would poison
             # every later turn. Roll the conversation back to before it, and keep the notes.
@@ -377,6 +382,7 @@ def create_app(
     database = (Database(database_url, legacy_memory=memory_path, legacy_audit=audit_path)
                 if database_url else None)
     memory, audit = stores_for(database, memory_path, audit_path)
+    usage = usage_for(database, usage_path_for(audit_path))
     conversations = ConversationStore(database) if database else NullConversationStore()
     file_index = files.index_for(database, files_root)
     # What tools made that Shelby keeps, under the tools' own labels (records.py, collect.py).
@@ -404,7 +410,7 @@ def create_app(
         await registry.__aenter__()
         holder["hub"] = Hub(registry, config, context, audit,
                             refresh_context=lambda: context_for(memory, lexicon_path),
-                            conversations=conversations)
+                            conversations=conversations, usage=usage)
         app.state.hub = holder["hub"]
         # What a tool made is taken into the store and the database: after a call that changed something, when
         # the watcher sees a job finish, and now, which the first time is the taking-in of what is already there.
@@ -716,7 +722,7 @@ def create_app(
                 arguments["lexicon"] = str(lexicon)
 
         output, outcome = await execute(h.registry, tool, arguments, h.audit,
-                                        allow_gate, h.emit, origin="button")
+                                        allow_gate, h.emit, origin="button", usage=h.usage)
         # Only actions that changed something become notes. A status poll every few seconds
         # would bury the model's context in noise.
         if not tool.read_only:
@@ -1019,6 +1025,17 @@ def create_app(
         """The durable record of every tool call, newest first -- the live event stream only
         covers this run; this survives restarts."""
         return await audit.recent(max(1, min(limit, 2000)))
+
+    @app.get("/api/usage")
+    async def model_usage(limit: int = 5000) -> dict[str, Any]:
+        """Every request to a model the assistant has counted, newest first, each with its estimated cost in
+        dollars (null for a model with no price in usage.py). Grouping into days is the page's, in the viewer's
+        own time zone, as with the audit history. `since` is the oldest row returned, and counting began then
+        when `complete` is true (the limit did not cut the list short): nothing earlier was ever recorded."""
+        limit = max(1, min(limit, 20000))
+        rows = [priced(row) for row in await usage.recent(limit)]
+        return {"rows": rows, "since": rows[-1]["at"] if rows else None, "complete": len(rows) < limit,
+                "prices_as_of": PRICES_AS_OF}
 
     @app.get("/")
     async def root() -> dict[str, Any]:
