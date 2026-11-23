@@ -128,8 +128,11 @@ Shelby runs in Docker, which is also how it reaches your phone and other compute
 
 Two images, as on the host: **backend** (the API *and* every tool, which are its child processes) and
 **web** (the web app, still a separate program). All state lives in `./data`; the model's AWS login
-is read from `~/.aws`. Nothing is published beyond `127.0.0.1`. `up --audio` lets meet-ai record from
-this computer's microphone.
+is read from `~/.aws`. Nothing is published beyond `127.0.0.1`, with one opt-in exception: set
+`SHELBY_HOME_ADDRESS` in `.env` (this computer's address on your home network, see `.env.example`) and `up` also
+publishes the backend's port on that one address, for the TV app in `tv/`. Anything on that network can then reach the
+port; the access tokens and the Host check stop it, and the TV's own token can only play audiobooks. `up --audio` lets
+meet-ai record from this computer's microphone.
 
 **On a computer with an NVIDIA card**, transcribing (Whisper), speaking (Pocket TTS) and reading books
 (Docling) run on the card, found by itself: `./setup` and `./start-docker up` see the card's driver and

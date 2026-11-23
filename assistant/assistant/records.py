@@ -56,6 +56,11 @@ class RecordStore(ABC):
     @abstractmethod
     async def remove(self, record_id: str) -> None: ...
 
+    @abstractmethod
+    async def holders_of(self, file_id: str) -> list[tuple[str, str, str]]:
+        """Every record that keeps this file, as (tool, kind, role). Empty for a file no record names (an upload,
+        say). Asked by a token that may fetch only some tools' files (server.py, scoped tokens)."""
+
 
 class JsonRecordStore(RecordStore):
     """records.json, written whole to a temporary name and renamed, as index.json is."""
@@ -97,6 +102,9 @@ class JsonRecordStore(RecordStore):
 
     async def remove(self, record_id: str) -> None:
         self._save([r for r in self._load() if r.id != record_id])
+
+    async def holders_of(self, file_id: str) -> list[tuple[str, str, str]]:
+        return [(r.tool, r.kind, role) for r in self._load() for role, held in r.files.items() if held == file_id]
 
 
 def _when(seconds: float) -> datetime:
@@ -156,6 +164,12 @@ class PgRecordStore(RecordStore):
 
     async def remove(self, record_id: str) -> None:
         await self.database.pool.execute("DELETE FROM records WHERE id = $1", record_id)
+
+    async def holders_of(self, file_id: str) -> list[tuple[str, str, str]]:
+        rows = await self.database.pool.fetch(
+            """SELECT r.tool, r.kind, f.role FROM record_files f JOIN records r ON r.id = f.record_id
+               WHERE f.file_id = $1""", file_id)
+        return [(row["tool"], row["kind"], row["role"]) for row in rows]
 
 
 def _from_row(row: Any, files: dict[str, str]) -> Record:

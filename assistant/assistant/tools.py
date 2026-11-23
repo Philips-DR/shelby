@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -30,7 +30,12 @@ QUALIFIER = "__"
 # a tool holding the database address could read memory, which no tool may.
 # The model's key is the backend's too, and goes by name to the one tool that calls a model (meet-ai, in tools.yaml):
 # inherited by all, it would sit in the environment of web-ai, which reads arbitrary web pages.
-WITHHELD_FROM_TOOLS = ("DATABASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# The tokens that open the backend's own API (the launch token, and a scoped one such as the TV's) are the same kind of
+# thing: a tool is a child process that can reach that API from inside the container, so one that held the launch
+# token held a way to do everything, and web-ai reads arbitrary web pages. Found 2026-11-23: all six tools held it,
+# and none reads it (no tool's own code mentions ASSISTANT_TOKEN).
+WITHHELD_FROM_TOOLS = ("DATABASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ASSISTANT_TOKEN",
+                       "ASSISTANT_TV_TOKEN")
 
 
 def tool_environment(extra: dict[str, str]) -> dict[str, str]:
@@ -107,6 +112,20 @@ class ToolOutcome:
 
 
 @dataclass(frozen=True)
+class Granted:
+    """What one scope may use, across every tool (`config.Grant`, added up). Tools are named as in qualified names and
+    in the records table (`safe_name`), the names the rest of the server already uses."""
+
+    actions: frozenset[str] = frozenset()  # qualified names, e.g. audiobook__read_chapter
+    records: dict[str, frozenset[str]] = field(default_factory=dict)  # tool -> kinds of its records
+    files: dict[str, frozenset[str]] = field(default_factory=dict)  # tool -> roles of their files
+    uploads: frozenset[str] = frozenset()  # kinds of upload the uploads list shows
+
+    def __bool__(self) -> bool:
+        return bool(self.actions or self.records or self.files or self.uploads)
+
+
+@dataclass(frozen=True)
 class RemoteTool:
     """One tool on one server, as the model will see it."""
 
@@ -147,6 +166,25 @@ class ToolRegistry:
         # Told of every call to a tool that may have changed something (not read-only, and not reported as failed),
         # once it has returned: what it made may now be worth keeping (collect.py). Nothing, until the server sets it.
         self.changed: Callable[[RemoteTool], None] = lambda _tool: None
+
+    def grants(self, scope: str) -> Granted:
+        """What tools.yaml lets one scope (a scoped token's) use, added up across every tool. Nothing for a scope no
+        tool names, which is the point: a token with no grant can do nothing."""
+        actions: set[str] = set()
+        records: dict[str, frozenset[str]] = {}
+        roles: dict[str, frozenset[str]] = {}
+        uploads: set[str] = set()
+        for server in self._servers:
+            grant = server.scopes.get(scope)
+            if grant is None:
+                continue
+            actions |= {f"{server.safe_name}{QUALIFIER}{name}" for name in grant.actions}
+            if grant.records:
+                records[server.safe_name] = frozenset(grant.records)
+            if grant.files:
+                roles[server.safe_name] = frozenset(grant.files)
+            uploads |= set(grant.uploads)
+        return Granted(frozenset(actions), records, roles, frozenset(uploads))
 
     def folders_of(self, server: str) -> list[Path]:
         """The folders one tool declared in tools.yaml (`files:`): what it makes, which may be served and kept."""

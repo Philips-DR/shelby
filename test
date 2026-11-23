@@ -5,6 +5,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 PY="$(pwd)/.venv/bin/python"
 AUDIOBOOK_PY="$(pwd)/audiobook/.venv/bin/python"  # its own environment: torch, Docling, Pocket TTS
 failed=()
+skipped=()
 run() { local name=$1; printf "\n==> %s\n" "$name"; shift; "$@" || failed+=("$name"); }
 run assistant bash -c "cd assistant && $PY -m pytest tests -q"
 run meet-ai   bash -c "cd meet-ai && $PY -m pytest tests -q"
@@ -15,6 +16,17 @@ run audiobook bash -c "cd audiobook && $AUDIOBOOK_PY -m pytest tests -q"
 run docu-ai   bash -c "cd docu-ai && npm test --silent"
 run web       bash -c "cd web && npx tsc --noEmit && npm test --silent"
 run publish   bash -c "cd publish && $PY -m pytest -q -p no:cacheprovider"
+# tv: the Android TV app's unit tests. They need the JDK and the Android SDK, which ./setup does not install (see
+# tv/CLAUDE.md), and the libraries Gradle kept from the first build; --offline makes it work with no network. A machine
+# without the toolchain skips it and says so, instead of failing for an app it never builds.
+TV_JDK="${JAVA_HOME:-$HOME/jdks/jdk-17}"; TV_SDK="${ANDROID_HOME:-$HOME/Android/Sdk}"
+if [[ -x "$TV_JDK/bin/java" && -d "$TV_SDK" ]]; then
+  run tv bash -c "cd tv && JAVA_HOME='$TV_JDK' ANDROID_HOME='$TV_SDK' ./gradlew testDebugUnitTest --offline --no-daemon -q"
+else
+  printf "\n==> tv\nSKIPPED: no JDK at %s or no Android SDK at %s, so the TV app's tests were not run\n" "$TV_JDK" "$TV_SDK"
+  skipped+=(tv)
+fi
 echo
 if ((${#failed[@]})); then echo "FAILED: ${failed[*]}"; exit 1; fi
+if ((${#skipped[@]})); then echo "All that ran passed. NOT RUN: ${skipped[*]}"; exit 0; fi
 echo "All passed."

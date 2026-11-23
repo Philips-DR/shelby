@@ -98,6 +98,25 @@ MIN_SCHEDULE_MINUTES = 5
 
 
 @dataclass(frozen=True)
+class Grant:
+    """What a scoped token (a device's, such as the TV's, not a person's) may use of one tool. Declared in
+    tools.yaml under the tool's `scopes`, so the server never has to know what a tool is called or what it keeps."""
+
+    # Calls the token may make through /api/actions, as the tool names them. Each must also be read-only: the server
+    # refuses one that is not, so a mistake here can never hand out a write.
+    actions: tuple[str, ...] = ()
+    # Kinds of the tool's kept records (records.py) the token may list and read.
+    records: tuple[str, ...] = ()
+    # Roles of those records' files the token may fetch by id, and no others (a voice's recording is a file too).
+    files: tuple[str, ...] = ()
+    # Kinds of upload the uploads list shows it (`book`). Everything else is left out of the list.
+    uploads: tuple[str, ...] = ()
+
+
+GRANT_KEYS = ("actions", "records", "files", "uploads")
+
+
+@dataclass(frozen=True)
 class ToolServer:
     """One MCP server the assistant can launch. A child process, not a service."""
 
@@ -112,6 +131,8 @@ class ToolServer:
     # Tools the backend runs on a timer, whether or not anyone has a page open. Declared here, like
     # everything else about a tool, so the server never has to know which tool keeps a mailbox.
     schedule: list[Schedule] = field(default_factory=list)
+    # What each scoped token may use of this tool: scope name -> Grant. A scope no tool names grants nothing.
+    scopes: dict[str, Grant] = field(default_factory=dict)
 
     @property
     def safe_name(self) -> str:
@@ -202,8 +223,39 @@ def load_tool_servers(path: Path) -> list[ToolServer]:
                 files=[_resolve_path(str(f), Path(cwd) if cwd else base, where)
                        for f in entry.get("files", [])],
                 schedule=[_schedule(item, where) for item in entry.get("schedule") or []],
+                scopes=_scopes(entry.get("scopes"), where),
             )
         )
+    return out
+
+
+def _scopes(raw: Any, where: str) -> dict[str, Grant]:
+    """`{tv: {actions: [read_chapter], records: [chapter], files: [audio], uploads: [book]}}`. Strict, like
+    `_schedule`: a typo that quietly granted nothing would look like a working token that cannot do anything, and one
+    that quietly granted too much is the failure this exists to prevent. So an unknown key, a name that is not a
+    plain word, or a list that is not a list of names stops the server starting."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where}: `scopes` must name each scope, as {{tv: {{actions: [...]}}}}")
+    out: dict[str, Grant] = {}
+    for scope, grant in raw.items():
+        if not isinstance(scope, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", scope):
+            raise ValueError(f"{where}: a scope is named in lower-case letters, digits and underscores, not {scope!r}")
+        if not isinstance(grant, dict) or not grant:
+            raise ValueError(f"{where}: scope {scope!r} must say what it may use, from {', '.join(GRANT_KEYS)}")
+        unknown = sorted(set(grant) - set(GRANT_KEYS))
+        if unknown:
+            raise ValueError(f"{where}: scope {scope!r} has {', '.join(map(repr, unknown))}; only "
+                             f"{', '.join(GRANT_KEYS)} are understood")
+        lists: dict[str, tuple[str, ...]] = {}
+        for key in GRANT_KEYS:
+            names = grant.get(key) or []
+            if not isinstance(names, list) or not all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n)
+                                                     for n in names):
+                raise ValueError(f"{where}: scope {scope!r}, {key}: must be a list of plain names")
+            lists[key] = tuple(names)
+        out[scope] = Grant(**lists)
     return out
 
 

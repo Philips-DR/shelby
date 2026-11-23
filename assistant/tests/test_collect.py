@@ -194,21 +194,28 @@ async def behaves_like_records(records, index):
     got = await records.get("bench", "chapter", "b/1")
     listed = [(r.kind, r.text) for r in await records.find("bench")]
     chapters = [r.id for r in await records.find("bench", "chapter")]
+    # Which record keeps a file (a scoped token may fetch only some tools' files): by tool, kind and role.
+    holders = await records.holders_of("f" * 32)
+    nobody = await records.holders_of("9" * 32)
     # Filed again under the same key: replaced, files and all.
     await records.put(Record("1" * 32, "bench", "chapter", "b/1", {"book": "b"}, "new words", "v2", {"audio": "e" * 32},
                              created=10.0, updated=30.0))
     replaced = await records.by_id("1" * 32)
+    held_after = (await records.holders_of("e" * 32), await records.holders_of("f" * 32))
     await records.remove("2" * 32)
     after = [r.id for r in await records.find("bench")]
-    return got, listed, chapters, replaced, after
+    return got, listed, chapters, replaced, after, holders, nobody, held_after
 
 
-def check_records(got, listed, chapters, replaced, after):
+def check_records(got, listed, chapters, replaced, after, holders, nobody, held_after):
     assert got.labels == {"book": "b", "number": 1, "title": "Á"} and got.text == "words" and got.files == {"audio": "f" * 32}
     assert listed == [("voice", None), ("chapter", None)]  # newest first, and a listing carries no text
     assert chapters == ["1" * 32]
     assert (replaced.text, replaced.version, replaced.files) == ("new words", "v2", {"audio": "e" * 32})
     assert after == ["1" * 32]
+    assert holders == [("bench", "chapter", "audio")] and nobody == []
+    # The file the record let go of is no longer kept by it, and the one it took now is.
+    assert held_after == ([("bench", "chapter", "audio")], [])
 
 
 def test_the_records_file_keeps_records_by_tool_kind_and_key(tmp_path):

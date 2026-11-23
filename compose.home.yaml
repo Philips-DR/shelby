@@ -1,0 +1,13 @@
+# Added by ./start-docker when SHELBY_HOME_ADDRESS is set in .env: the backend's port, on that ONE home-network address,
+# for the TV app (tv/). Not 0.0.0.0: the laptop's other addresses (its Wi-Fi, a VPN, Docker's bridges) do not carry it.
+#
+# Anything on that network can then reach the port. What stops it is the token (a random 32 characters) and the Host list
+# (ASSISTANT_HOSTS, which ./start-docker extends with this address); the TV's own token can only play audiobooks
+# (assistant/CLAUDE.md -> Scoped tokens). It is plain http, so what the TV fetches can be read by anything on the Wi-Fi:
+# that is why the TV has a token of its own and never the one that can do everything.
+#
+# ./start-docker checks the address first: private, and this machine's own right now. Unset, none of this is added.
+services:
+  backend:
+    ports:
+      - "${SHELBY_HOME_ADDRESS:?set SHELBY_HOME_ADDRESS in .env to this machine's home address}:8750:8750"

@@ -8,7 +8,9 @@
 #   ngrok      optional (--ngrok): HTTPS tunnels to the web app and API via ngrok
 #
 # Nothing here is published beyond 127.0.0.1. Reaching it from elsewhere is Tailscale's job, which
-# opens it to the devices you have signed in and to nobody else.
+# opens it to the devices you have signed in and to nobody else. One opt-in exception: with SHELBY_HOME_ADDRESS
+# set in .env, ./start-docker adds compose.home.yaml, which publishes the backend's port on that one home-network
+# address for the TV app (tv/). Only the backend, only that address, and only on purpose.
 name: shelby
 
 x-service: &service
@@ -51,12 +53,16 @@ services:
       - path: .env
         required: false               # AWS_PROFILE and AWS_REGION, as on the host
     environment:
-      # Listens on the container's own network; compose publishes it to 127.0.0.1 only. The one place
-      # the "bind to localhost" rule is deliberately relaxed (assistant/CLAUDE.md), and it still
-      # needs the token and a Host from this list.
+      # Listens on the container's own network; compose publishes it to 127.0.0.1 only (and, when
+      # SHELBY_HOME_ADDRESS is set, to that one address: compose.home.yaml). The one place the "bind to
+      # localhost" rule is deliberately relaxed (assistant/CLAUDE.md), and it still needs the token and a Host
+      # from this list.
       ASSISTANT_HOST: 0.0.0.0
       ASSISTANT_PORT: 8750
       ASSISTANT_TOKEN: ${ASSISTANT_TOKEN:?run ./start-docker, which makes the token, or set ASSISTANT_TOKEN}
+      # The TV app's own token, fixed in .env because the TV has it built in. It may use only what tools.yaml grants
+      # the tv scope (assistant/CLAUDE.md -> Scoped tokens). Empty: there is no such way in.
+      ASSISTANT_TV_TOKEN: ${ASSISTANT_TV_TOKEN:-}
       ASSISTANT_HOSTS: ${ASSISTANT_HOSTS:-${SHELBY_HOST:-shelby.invalid},backend}
       ASSISTANT_ORIGINS: ${ASSISTANT_ORIGINS:-http://127.0.0.1:8751,http://localhost:8751,https://${SHELBY_HOST:-shelby.invalid}}
       # Memory, the audit log and sign-in sessions live in the database. The two files below are what they

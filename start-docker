@@ -11,6 +11,9 @@
 #
 # `up` makes a fresh access token each time (unless ASSISTANT_TOKEN is set in .env), gives it to the
 # backend and the web app, and creates ./data owned by you rather than by Docker's root.
+#
+# With SHELBY_HOME_ADDRESS set in .env, `up` also publishes the backend's port on that one home-network address,
+# for the TV app (tv/); without it nothing is published beyond 127.0.0.1. See README.md -> In containers.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -39,6 +42,34 @@ done
 if $use_ngrok && [[ "$cmd" == up && -z "${NGROK_AUTHTOKEN:-}" ]]; then
   echo "--ngrok needs NGROK_AUTHTOKEN in .env (see .env.example)." >&2
   exit 1
+fi
+# The TV app reaches the backend over the home network. SHELBY_HOME_ADDRESS (.env) is the one address of this machine to
+# publish the backend's port on (compose.home.yaml); the backend answers 403 to any Host it does not list, so the
+# address is listed too. Never a pattern and never 0.0.0.0: one address, which must be private and be this machine's
+# own right now, or `up` stops before anything starts. Unset, nothing is published beyond 127.0.0.1.
+home_host=""
+if [[ -n "${SHELBY_HOME_ADDRESS:-}" ]]; then
+  home_host="$SHELBY_HOME_ADDRESS"
+  files+=(-f compose.home.yaml)
+  if [[ "$cmd" == up ]]; then
+    python3 - "$home_host" <<'PY' || exit 1
+import ipaddress, subprocess, sys
+given = sys.argv[1]
+try:
+    ip = ipaddress.IPv4Address(given)
+except ValueError:
+    sys.exit(f"SHELBY_HOME_ADDRESS={given!r} in .env is not an IPv4 address such as 192.168.1.20.")
+if not ip.is_private or ip.is_loopback or ip.is_link_local:
+    sys.exit(f"SHELBY_HOME_ADDRESS={given} is not a private home-network address (192.168.x.x, 10.x.x.x or 172.16-31.x.x). "
+             "Refusing to publish the backend there.")
+mine = subprocess.run(["ip", "-4", "-o", "addr"], capture_output=True, text=True).stdout
+have = [line.split()[3].split("/")[0] for line in mine.splitlines() if len(line.split()) > 3]
+if given not in have:
+    sys.exit(f"SHELBY_HOME_ADDRESS={given} is not an address of this machine right now (is the cable or Wi-Fi up, "
+             f"or did the address change?). It has: {', '.join(a for a in have if not a.startswith('127.'))}.")
+PY
+    export ASSISTANT_HOSTS="${ASSISTANT_HOSTS:-${SHELBY_HOST:-shelby.invalid},backend},$home_host"
+  fi
 fi
 # The speech models use an NVIDIA card when the host has one (its driver answers) and Docker can hand it to a
 # container (the NVIDIA Container Toolkit has given Docker its runtime). SHELBY_GPU=cpu in .env says no;
@@ -136,7 +167,7 @@ YAML
       ngrok_web_host="$(echo "$NGROK_WEB_URL" | sed 's|https://||; s|/.*||')"
       ngrok_api_host="$(echo "$NGROK_API_URL" | sed 's|https://||; s|/.*||')"
       # Phase 2: recreate backend and web with the ngrok origins, hosts and API URL added.
-      export ASSISTANT_HOSTS="${SHELBY_HOST:-shelby.invalid},backend,web,$ngrok_web_host,$ngrok_api_host"
+      export ASSISTANT_HOSTS="${SHELBY_HOST:-shelby.invalid},backend,web,$ngrok_web_host,$ngrok_api_host${home_host:+,$home_host}"
       export ASSISTANT_ORIGINS="http://127.0.0.1:8751,http://localhost:8751,https://${SHELBY_HOST:-shelby.invalid},$NGROK_WEB_URL"
       export ASSISTANT_REMOTE_API_URL="$NGROK_API_URL"
       dc up -d backend web
@@ -149,6 +180,9 @@ YAML
       dc up -d --build --wait
       echo
       echo "Up. On this computer:  http://127.0.0.1:8751/"
+      if [[ -n "$home_host" ]]; then
+        echo "On the home network:   http://$home_host:8750/   (the TV app's route: anything on this network can reach the port; the TV's token can only play audiobooks)"
+      fi
       if [[ ${#profiles[@]} -gt 0 ]]; then
         if [[ -n "${SHELBY_HOST:-}" ]]; then
           echo "Over Tailscale:        https://${SHELBY_HOST}/   (from a device signed in to your tailnet)"

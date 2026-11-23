@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- No action bar (the default theme drew a grey "Shelby" strip across the top), and the window
+         is the app's own background from the first frame, so there is no white flash on start. -->
+    <style name="Theme.Shelby" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/shelby_bg</item>
+        <item name="android:statusBarColor">@color/shelby_bg</item>
+        <item name="android:navigationBarColor">@color/shelby_bg</item>
+    </style>
+</resources>

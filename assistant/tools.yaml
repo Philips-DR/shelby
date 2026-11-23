@@ -72,3 +72,13 @@ servers:
     # What it makes: the audio, its voices and the recordings they were cloned from. Relative to its own folder.
     # Nothing outside the folders named here is ever served, or taken into Shelby's keeping (collect.py).
     files: [output, voices, voice]
+    # What the TV app's token (ASSISTANT_TV_TOKEN) may use of this tool, and nothing else (assistant/CLAUDE.md ->
+    # Scoped tokens). Two read-only calls: a book's chapters, and a chapter's text. The kept `chapter` and `book`
+    # records and the `audio` of the chapters, not the voices, samples and job logs the same tool keeps. The PDFs in
+    # the uploads list, because that is where the app finds the path the two calls take.
+    scopes:
+      tv:
+        actions: [preview_book, read_chapter]
+        records: [chapter, book]
+        files: [audio]
+        uploads: [book]

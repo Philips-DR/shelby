@@ -30,3 +30,6 @@ audiobook/voices
 audiobook/voice
 audiobook/.jobs
 audiobook/tests/fixtures/local
+# The Android TV app is built on the host, never in an image. Its folder holds the access token (token.txt),
+# an APK that carries it, and 200 MB of build output; the backend does not run any of it.
+tv

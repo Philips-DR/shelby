@@ -12,7 +12,7 @@ changing the tool.
     ./setup    # idempotent: shared .venv, audiobook's own .venv, npm ci for docu-ai and the web app, speaker models
     ./start    # ./auth, then ./start-docker up: database, backend (API, :8750; launches every tool over MCP stdio) and web app (:8751), in containers
     ./start-docker up [--tailscale] [--ngrok]   # what ./start runs; the flags add a private or a public address
-    ./test     # all nine test suites (the eight tools' and publish-check's). Must pass with no credentials, no model, no network
+    ./test     # all nine test suites (the eight tools' and publish-check's), then the TV app's if its JDK and Android SDK are installed (else it says NOT RUN). Must pass with no credentials, no model, no network
     ./auth     # every login (AWS, Google Docs, Gmail): renews only the dead ones, and copies Google tokens into data/config for the containers; --check to just look
     ./renew-secrets   # a server's logins: sends it fresh AWS credentials + Google tokens over ssh (README → "On a server")
     ./publish-check   # before every push: the commits GitHub lacks, for secrets (exit 1) and personal details (exit 2); --all for every commit
@@ -25,6 +25,18 @@ across origins, with one access token — never an import, a shared build, a pro
 backend hands out. `./start-docker up` (which `./start` runs) makes the token (random per launch),
 gives it to both, and the web app's server writes it into the page; nobody pastes it. They run as
 separate containers. See `assistant/CLAUDE.md` for what the split forced (token hand-over, CORS ordering).
+
+## The TV app is a third program (`tv/`)
+
+`tv/` is a native Android TV app (Kotlin, Compose for TV): the audiobook player, sideloaded to the user's TV with
+`adb`. Like `web/` it has its own folder, build and toolchain (JDK 17 and the Android SDK, which `./setup` does not
+install), shares no code with any other part of Shelby, and meets the backend only over HTTP, with a token of its own
+(`ASSISTANT_TV_TOKEN` in `.env`: it may play audiobooks and nothing else, `assistant/CLAUDE.md` -> Scoped tokens). The
+backend does not start it and no image holds it: `.dockerignore` lists `tv`, because its folder carries `token.txt` and
+an APK with the token inside. **The repository is public: the token and any APK are never committed** (`tv/.gitignore`).
+It reaches the backend over the home network (`SHELBY_HOME_ADDRESS` in `.env`, and the address in the git-ignored
+`tv/server.txt`; the exception to "nothing is published beyond `127.0.0.1`" below), or through `adb reverse` when
+there is no `server.txt`. Read `tv/CLAUDE.md` and `tv/plan.md` before changing it.
 
 ## One folder, not one program
 
@@ -129,10 +141,17 @@ Shelby also runs in Docker, which is how it is reached from a phone or another c
   The database is state too: `./data/postgres`, a `postgres:16-alpine` container run as your uid, with no
   published port, which only the backend reaches. It holds the assistant's memory, audit log and sign-in
   sessions (`assistant/CLAUDE.md` → "The database"); the tools keep their own files and never see it.
-- **Nothing is published beyond `127.0.0.1`**, and the backend and web app listen on `0.0.0.0` *inside*
-  the container network only (`ASSISTANT_HOST`, `WEB_HOST`). That is the one deliberate relaxation of
-  "bind to localhost"; the token and the Host check still apply to everything. Reaching it from
-  elsewhere is the Tailscale sidecar's job (`--tailscale`), not a published port's.
+- **Nothing is published beyond `127.0.0.1`, except one port on one address, and only when `SHELBY_HOME_ADDRESS` is
+  set in `.env` (2026-11-23, for the TV app).** The backend and web app listen on `0.0.0.0` *inside* the container
+  network only (`ASSISTANT_HOST`, `WEB_HOST`). That is the one deliberate relaxation of "bind to localhost"; the token
+  and the Host check still apply to everything. Reaching it from elsewhere is the Tailscale sidecar's job
+  (`--tailscale`), not a published port's. **The exception:** with `SHELBY_HOME_ADDRESS` set, `./start-docker up` also
+  publishes the *backend's* port 8750 (`compose.home.yaml`) on that one home-network address, and lists the address as a
+  Host. Never `0.0.0.0`, never the web app, never the database; `up` refuses an address that is not private or is not
+  this machine's own right now, before it starts anything. Anything on that network can then reach the port, over plain
+  http: the launch token and the Host check stop it, and the TV's own token (`assistant/CLAUDE.md` -> Scoped tokens)
+  can only play audiobooks. Unset, nothing here changes. The laptop must have that address in the router (fixed), be on,
+  and be running Shelby whenever the TV is used.
 - **Hosts are exact names** (`ASSISTANT_HOSTS`, shared by both programs; `SHELBY_HOST` in `.env`), never a
   pattern or `*`: the Host check is what stops a hostile page pointing its own name at this machine.
 - **No source is mounted over the image.** A change to the code is live after `./start-docker up`

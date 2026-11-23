@@ -12,7 +12,9 @@ Security, because this process can send email as you:
   * every /api request must carry a random token issued at launch and injected into the
     page -- a site in another tab can make your browser POST to localhost, but it cannot
     read the page to learn the token;
-  * requests whose Host is not localhost are refused, which closes DNS rebinding.
+  * requests whose Host is not localhost are refused, which closes DNS rebinding;
+  * a scoped token (the TV's, ASSISTANT_TV_TOKEN) is a device's, not a person's: it reaches five routes and, on
+    each, only what tools.yaml grants its scope. Everything else under /api is refused before a handler runs.
 """
 
 from __future__ import annotations
@@ -57,7 +59,7 @@ from assistant.documents import document_tools
 from assistant.setup import context_for, current_lexicon, lexicon_path_for, prepare, stores_for
 from assistant.logins import Logins
 from assistant.status import model_failure, network_status, tools_status
-from assistant.tools import RemoteTool, ToolRegistry
+from assistant.tools import Granted, RemoteTool, ToolRegistry
 from assistant.schedule import run_every
 from assistant.usage import PRICES_AS_OF, UsageStore, priced, usage_for, usage_path_for
 from assistant.watchers import watch, watch_login
@@ -67,6 +69,31 @@ HISTORY_LIMIT = 1000
 KEEPALIVE_SECONDS = 15
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 LOOPBACK_BINDS = {"127.0.0.1", "::1", "localhost"}
+
+# Who a request is from (authenticate): FULL may use the whole API (the launch token, or a Google sign-in). A scoped
+# token names its scope instead, and the scope is what tools.yaml grants (config.Grant).
+FULL = "full"
+# Scope -> the environment variable that holds its token. Fixed in .env, because a device's token cannot change on
+# every launch the way the launch token does (the TV has it built in).
+SCOPE_TOKEN_VARS = {"tv": "ASSISTANT_TV_TOKEN"}
+# A token that crosses a home network in plain http must not be short enough to guess: token_urlsafe(24) is 32.
+MIN_SCOPED_TOKEN = 24
+
+
+def scoped_route(method: str, path: str) -> bool:
+    """The only routes a scoped token may reach at all. On four of them the handler narrows it further, to what
+    its scope is granted; the rest of /api never learns it knocked. `/api/files` (what a tool left at its bench, by
+    path) and `/api/events` are not here, nor is anything that writes."""
+    if (method, path) in {("GET", "/api/records"), ("GET", "/api/uploads"), ("POST", "/api/actions")}:
+        return True
+    folder, _, last = path.rpartition("/")
+    return method == "GET" and folder in ("/api/records", "/api/files") and files.is_id(last)
+
+
+def same_token(supplied: str, expected: str) -> bool:
+    """Constant time, and on bytes: compare_digest refuses a str with a non-ASCII character by raising, which a
+    stranger could make happen with a header."""
+    return secrets.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
 
 
 def parse_hosts(value: str | None) -> frozenset[str]:
@@ -385,6 +412,7 @@ def create_app(
     allowed_emails: frozenset[str] = frozenset(),
     database_url: str | None = None,
     settings_path: Path | None = None,
+    scoped_tokens: dict[str, str] | None = None,
 ) -> FastAPI:
     # Every file Shelby keeps (files.py): <root>/<id>/<name>, each recorded in the `files` table, or in
     # index.json there with no database. `legacy_uploads` is the old uploads folder, copied in once on start.
@@ -395,6 +423,16 @@ def create_app(
     if texts_root.is_relative_to(files_root) or files_root.is_relative_to(texts_root):
         raise ValueError(f"the texts folder ({texts_root}) and the file store ({files_root}) must be apart")
     token = token or secrets.token_urlsafe(24)
+    # Scope -> token (SCOPE_TOKEN_VARS). A mistake stops the server starting, and the message never holds a token.
+    scoped_tokens = dict(scoped_tokens or {})
+    for scope, scoped in scoped_tokens.items():
+        if len(scoped) < MIN_SCOPED_TOKEN:
+            raise ValueError(f"the {scope} token is shorter than {MIN_SCOPED_TOKEN} characters; "
+                             f"make one with: python -c 'import secrets; print(secrets.token_urlsafe(24))'")
+        if same_token(scoped, token):
+            raise ValueError(f"the {scope} token is the same as the launch token; it must be a token of its own")
+    if len(set(scoped_tokens.values())) != len(scoped_tokens):
+        raise ValueError("two scopes share one token; each needs its own")
     holder: dict[str, Hub] = {}
     # With a database URL, memory, the audit log and sign-in sessions live in PostgreSQL and the two
     # files are imported into it once; without one they are the files. Connected in the lifespan.
@@ -427,6 +465,16 @@ def create_app(
         registry = (registry_factory(local_tools) if registry_factory
                     else ToolRegistry(load_tool_servers(tools_path), local=local_tools))
         registry.lend = lender.lend
+        # A token that may do nothing looks like a working one that is broken, and a grant for an upload kind that
+        # is not listed would never show: both are said at start, before any tool is launched.
+        for scope in scoped_tokens:
+            grant = registry.grants(scope)
+            if not grant:
+                raise ValueError(f"there is a {scope} token but no tool in tools.yaml grants the {scope} scope")
+            unlisted = sorted(grant.uploads - set(up.LISTED))
+            if unlisted:
+                raise ValueError(f"the {scope} scope is granted uploads of kind {', '.join(unlisted)}, which the "
+                                 f"uploads list does not show; the kinds are {', '.join(up.LISTED)}")
         # Held open for the life of the server: the tools stay running instead of being
         # relaunched for every request.
         await registry.__aenter__()
@@ -483,21 +531,30 @@ def create_app(
     sessions = ((PgSessionStore(database) if database is not None else MemorySessionStore())
                 if google_client_id and google_client_secret else None)
 
-    async def authenticate(request: Request) -> bool:
-        """Is this request from someone who may use the API? The one place that decides.
+    async def authenticate(request: Request) -> str | None:
+        """Who is this request from? The one place that decides.
 
-        Two ways in: the launch token (header or, for EventSource, query param) and a Google
-        sign-in session cookie. Either one is enough."""
+        FULL for the launch token (header or, for EventSource, query param) or a Google sign-in session cookie: either
+        is enough. The scope's name for a scoped token (a device's, such as the TV's). None for nobody."""
         supplied = request.headers.get("x-assistant-token") or ""
         if not supplied and request.url.path == "/api/events":
             supplied = request.query_params.get("token", "")
-        if supplied and secrets.compare_digest(supplied, token):
-            return True
+        if supplied:
+            if same_token(supplied, token):
+                return FULL
+            for scope, scoped in scoped_tokens.items():
+                if same_token(supplied, scoped):
+                    return scope
         if sessions is not None:
             sid = request.cookies.get("session", "")
             if sid and await sessions.get(sid) is not None:
-                return True
-        return False
+                return FULL
+        return None
+
+    def granted(request: Request) -> Granted | None:
+        """None for the whole API; for a scoped token, what tools.yaml grants its scope."""
+        scope = request.state.scope
+        return None if scope == FULL else hub().registry.grants(scope)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -507,8 +564,13 @@ def create_app(
         path = request.url.path
         if path.startswith("/auth/") or path == "/api/me":
             return await call_next(request)
-        if path.startswith("/api/") and not await authenticate(request):
-            return JSONResponse({"error": "missing or wrong token"}, status_code=401)
+        if path.startswith("/api/"):
+            scope = await authenticate(request)
+            if scope is None:
+                return JSONResponse({"error": "missing or wrong token"}, status_code=401)
+            request.state.scope = scope
+            if scope != FULL and not scoped_route(request.method, path):
+                return JSONResponse({"error": "this token cannot do that"}, status_code=403)
         return await call_next(request)
 
     app.add_middleware(
@@ -724,17 +786,25 @@ def create_app(
         return {"approved": body.approve}
 
     @app.post("/api/actions")
-    async def action(body: ActionRequest) -> dict[str, Any]:
+    async def action(body: ActionRequest, request: Request) -> dict[str, Any]:
         """A button press: you chose the tool, so no model is involved.
 
         The click is the approval -- except where the tool declares a preview of its
         effect, as sending an email does. There the first press returns the preview and
         only a confirmed second press acts, the same rule the chat gate applies.
+
+        A scoped token may press only the buttons its scope is granted, and only a read-only one: the grant is
+        checked before the tool is looked up, so a name it may not use gets the same answer whether or not it exists.
         """
         h = hub()
+        allowed = granted(request)
+        if allowed is not None and body.tool not in allowed.actions:
+            raise HTTPException(403, "this token cannot do that")
         tool = h.registry.find(body.tool)
         if tool is None:
             raise HTTPException(404, f"no tool {body.tool}")
+        if allowed is not None and not tool.read_only:
+            raise HTTPException(403, "this token cannot do that")
 
         if needs_approval(tool) and tool.preview is not None and not body.confirmed:
             preview = await h.registry.preview_of(tool, body.arguments)
@@ -822,8 +892,14 @@ def create_app(
         return JSONResponse({"error": str(error)}, status_code=400)
 
     @app.get("/api/uploads")
-    async def list_uploads() -> dict[str, Any]:
-        return await up.listing(file_index, files_root, texts_root)
+    async def list_uploads(request: Request) -> dict[str, Any]:
+        listing = await up.listing(file_index, files_root, texts_root)
+        allowed = granted(request)
+        if allowed is None:
+            return listing
+        # A scoped token sees the kinds it is granted and an empty list for the rest, so what it parses keeps its shape.
+        shown_lists = {up.LISTED[kind] for kind in allowed.uploads if kind in up.LISTED}
+        return {name: items if name in shown_lists else [] for name, items in listing.items()}
 
     async def take(request: Request, name: str, kind: str, target_for: Callable[[Path, str], tuple[str, Path]],
                    limit: int) -> tuple[files.StoredFile, Path]:
@@ -953,12 +1029,22 @@ def create_app(
         return result
 
     @app.get("/api/files/{file_id}")
-    async def stored_file(file_id: str):
+    async def stored_file(file_id: str, request: Request):
         """An upload, by the id the listing gave it, for the web app to play or download. A folder of
-        markdown is not a file to send. Every refusal is the same plain 404, as for /api/files."""
+        markdown is not a file to send. Every refusal is the same plain 404, as for /api/files.
+
+        A scoped token gets only a file that records its scope is granted keep, in a role it is granted: the audio of
+        a chapter, not a voice's recording nor a meeting's audio nor an upload no record names. A file held by
+        several records needs every one of them to allow it."""
         record = await file_index.get(file_id) if files.is_id(file_id) else None
         if record is None or record.kind == "docs":
             raise HTTPException(404, "no such file")
+        allowed = granted(request)
+        if allowed is not None:
+            holders = await records.holders_of(file_id)
+            if not holders or not all(kind in allowed.records.get(tool, ()) and role in allowed.files.get(tool, ())
+                                      for tool, kind, role in holders):
+                raise HTTPException(404, "no such file")
         candidate = files.path_of(files_root, record)
         try:
             resolved = candidate.resolve()
@@ -975,13 +1061,23 @@ def create_app(
     # -----------------------------------------------------------------------
 
     @app.get("/api/records")
-    async def list_records(tool: str, kind: str | None = None) -> dict[str, Any]:
-        return {"records": [await shown(r, file_index) for r in await records.find(tool, kind)]}
+    async def list_records(request: Request, tool: str, kind: str | None = None) -> dict[str, Any]:
+        allowed = granted(request)
+        if allowed is None:
+            return {"records": [await shown(r, file_index) for r in await records.find(tool, kind)]}
+        # A scoped token is told "no" for a tool or a kind it is not granted, and asking for no kind gets only the
+        # kinds it is granted (a tool's records also hold its voices and its job logs).
+        kinds = allowed.records.get(tool)
+        if kinds is None or (kind is not None and kind not in kinds):
+            raise HTTPException(403, "this token cannot do that")
+        return {"records": [await shown(r, file_index) for r in await records.find(tool, kind) if r.kind in kinds]}
 
     @app.get("/api/records/{record_id}")
-    async def one_record(record_id: str) -> dict[str, Any]:
+    async def one_record(record_id: str, request: Request) -> dict[str, Any]:
         record = await records.by_id(record_id) if files.is_id(record_id) else None
-        if record is None:
+        allowed = granted(request)
+        # One that a scoped token may not read is the plain 404 a missing one gets: it says nothing of what exists.
+        if record is None or (allowed is not None and record.kind not in allowed.records.get(record.tool, ())):
             raise HTTPException(404, "no such record")
         return {**await shown(record, file_index), "text": record.text}
 
@@ -1123,6 +1219,8 @@ def main() -> None:
     origins = tuple(o.strip() for o in os.environ.get("ASSISTANT_ORIGINS", "").split(",") if o.strip())
     hosts = parse_hosts(os.environ.get("ASSISTANT_HOSTS"))
     fixed = bool(os.environ.get("ASSISTANT_TOKEN"))
+    # A device's token, fixed in .env because it is built into the device (the TV's APK). Unset means no such door.
+    scoped = {scope: os.environ[var] for scope, var in SCOPE_TOKEN_VARS.items() if os.environ.get(var)}
     holder: dict[str, FastAPI] = {}
 
     def announce() -> None:
@@ -1159,6 +1257,9 @@ def main() -> None:
             print(f"  NOT copied in: {unreadable} markdown folder(s) that are not UTF-8 text; they are in "
                   f"docs.imported", flush=True)
         print(f"access token: {holder['app'].state.token}", flush=True)
+        for scope in scoped:
+            # Said, never shown: this line goes to a log.
+            print(f"  {scope} token: set; it may use only what tools.yaml grants the {scope} scope", flush=True)
         if not fixed:
             print("  (new on every launch; set ASSISTANT_TOKEN in .env to keep one across restarts)",
                   flush=True)
@@ -1166,7 +1267,7 @@ def main() -> None:
     app = create_app(Path(args.tools), Path(args.memory), Path(args.audit), files_path=stored,
                      texts_path=lent, legacy_uploads=uploads,
                      provider=args.provider, model=args.model,
-                     token=os.environ.get("ASSISTANT_TOKEN") or None,
+                     token=os.environ.get("ASSISTANT_TOKEN") or None, scoped_tokens=scoped,
                      origins=origins or DEFAULT_ORIGINS, hosts=hosts, on_ready=announce,
                      google_client_id=os.environ.get("GOOGLE_CLIENT_ID") or None,
                      google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET") or None,
@@ -1177,9 +1278,10 @@ def main() -> None:
                      settings_path=Path(os.environ["ASSISTANT_SETTINGS"]) if os.environ.get("ASSISTANT_SETTINGS") else None)
     holder["app"] = app
     # Loopback unless ASSISTANT_HOST says otherwise, and it says otherwise only in the container
-    # setup, whose compose file publishes the port to 127.0.0.1 and to a private Tailscale
-    # network, never to the world. Never bind 0.0.0.0 on a machine on a network you do not
-    # control: this process can send email as you.
+    # setup, whose compose file publishes the port to 127.0.0.1, to a private Tailscale network and,
+    # when SHELBY_HOME_ADDRESS is set, to that one private home-network address (the TV app), never to
+    # the world. Never bind 0.0.0.0 on a machine on a network you do not control: this process can send
+    # email as you.
     #
     # timeout_graceful_shutdown is not optional. uvicorn waits for open connections to drain
     # before stopping, and the event stream never drains on its own -- so any browser tab left

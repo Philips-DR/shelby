@@ -1,0 +1,16 @@
+# The repository is public. token.txt holds the TV's access token and an APK carries it
+# (BuildConfig.API_TOKEN), so neither is ever committed. Found NOT ignored on 2026-11-22.
+token.txt
+*.apk
+*.aab
+# The laptop's address on the home network (BuildConfig.SHELBY_URL, and the one address the app may use plain http to).
+# Private, but it is somebody's home network, and the repository is public.
+server.txt
+
+# Machine-local and build output.
+local.properties
+build/
+.gradle/
+.kotlin/
+.idea/
+.cxx/

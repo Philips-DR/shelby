@@ -133,11 +133,13 @@ may create databases on (each test makes one and drops it), so point it at a thr
 - **Status polls from buttons are not noted.** Only calls that change something are; a poll
   every few seconds would bury the model's context.
 - **Security:** 127.0.0.1 unless `ASSISTANT_HOST` says otherwise (only the container setup does, inside
-  its own network, with the port published to 127.0.0.1 and a Tailscale sidecar, never to the world; it
-  prints that it is not localhost-only); a token on every `/api` request; Host must be localhost or an
+  its own network, with the port published to 127.0.0.1, a Tailscale sidecar, and, when `SHELBY_HOME_ADDRESS` is set,
+  one private home-network address for the TV app, never to the world; it prints that it is not
+  localhost-only); a token on every `/api` request; Host must be localhost or an
   exact name in `ASSISTANT_HOSTS` (parsed by `parse_hosts`: names only, never patterns). The token may
   appear in a URL only for `/api/events`, because EventSource cannot send headers. Who may use the API
-  is decided in one function, `authenticate()`.
+  is decided in one function, `authenticate()`, which says who a request is from: the whole API (`FULL`) or
+  a scope (see "Scoped tokens").
 
 ## The interface is a separate program (`../web`)
 
@@ -411,6 +413,58 @@ to be recognised there.
 - **One allowed account, not accounts.** Per-user data (`memory.json`, uploads, each tool's credentials)
   is the larger option (c) in `plan.md` and is not part of this.
 
+## Scoped tokens: the TV (`ASSISTANT_TV_TOKEN`, `scopes` in `tools.yaml`, 2026-11-23)
+
+The launch token can do everything: any tool through `/api/actions`, Mail's reading included. The TV app (`../tv`) has
+its token built in and will reach the backend over the home network in plain http (step 9 of `../tv/plan.md`), so it
+gets a token of its own that can play books and nothing else. Built and run for real on 2026-11-23, with the user's
+yes to "audiobooks only".
+
+- **The token.** `ASSISTANT_TV_TOKEN` in `.env`, passed to the backend only (`compose.yaml`). Fixed, not random per
+  launch, because it is built into the APK. At least 24 characters and not the launch token, or the server does not
+  start (the message never holds a token); unset means there is no such way in. No tool holds it
+  (`WITHHELD_FROM_TOOLS`); checked in the running container, where only the backend and its init do.
+- **The allowance is declared by the tool's entry in `tools.yaml`** (`scopes: {tv: {actions, records, files, uploads}}`,
+  `config.Grant`, read as strictly as `schedule`: an unknown key or a bad name stops the server), so the server names no
+  tool. `ToolRegistry.grants("tv")` adds it up. A token whose scope nothing grants stops the server at start too, rather
+  than look like a working token that cannot do anything.
+- **Two layers.** (1) `scoped_route()` in the guard: five routes (list records, one record, a file by id, the uploads
+  list, actions); anything else under `/api` is a 403 before a handler runs, including `/api/events`, `/api/files` by
+  path and everything that writes. (2) The handlers narrow what is left: records only of the granted tool and kinds
+  (asking for no kind gets only those kinds); a record of another kind is the plain 404 a missing one gets; a file only if
+  every record that keeps it is of a granted kind and keeps it in a granted role; the uploads list shows only the granted
+  kinds, the other lists empty so the shape does not change; an action only if its name is granted **and** the tool is
+  read-only (a mistaken grant cannot hand out a write), checked before the tool is looked up, so a name it may not use
+  gets the same 403 whether or not it exists.
+- **Why not "these routes" alone** (the plan's first design). The real data on 2026-11-23: the audiobook tool's records
+  are 246 `chapter`, 10 `book`, but also 51 `job` (arguments and logs), 8 `sample`, 7 `voice` (each with its recording
+  and consent label), 4 `other` and 1 whole-book file; the uploads are 9 books, 8 meeting recordings, 10 documents and
+  4 voice samples. Routes alone would have let the TV token list and download all of them. So the grant is `records:
+  [chapter, book]`, `files: [audio]`, `uploads: [book]`, `actions: [preview_book, read_chapter]` (the plan's list left out
+  `preview_book`, which step 4 of the TV added).
+- **Also fixed in passing:** `authenticate()` compared tokens with `compare_digest` on strings, which raises on a
+  character that is not ASCII, so a stranger's header could make a 500. It compares bytes now (`same_token`).
+- **Not built, said plainly.** A TV read through `/api/actions` is quiet like the web's button reads (not audited, not
+  streamed), and a refusal is not logged anywhere. Nothing limits how fast a token may be guessed (it is 32 random
+  characters). The two calls take a `pdf` path and the grant does not confine it to the uploaded books: the tool reads only
+  a PDF it has analysed, and said "passwd is not a PDF" for `/etc/passwd`, but a PDF elsewhere that the tool had analysed
+  was not tried.
+- **Found, not changed: every tool holds the launch token.** `WITHHELD_FROM_TOOLS` keeps back the database address and
+  the model's key but not `ASSISTANT_TOKEN`, so on 2026-11-23 all six tool processes (web-ai, which reads arbitrary web
+  pages, and mail-ai among them) held it, and it can do everything. No tool's own code reads it. Adding it to the list is
+  one word; it is the user's call.
+- **Tests:** `tests/test_scoped_token.py` (27, on data shaped like the real records: voices with recordings, jobs, a
+  whole-book file, another tool's records, a file two records keep, a chapter's second file in a role that is not
+  granted) and `holders_of` in `test_collect.py` for both stores. Eight deliberate breaks of `server.py`, each caught;
+  the first set of data missed one (the role check: the voice's file was already stopped by its kind), so a case was
+  added. Whole suite with a throwaway Postgres: 480 pass, none skipped.
+- **Run for real** (2026-11-23, the rebuilt backend, the real records and uploads, both tokens read by the script and
+  never printed): 57 of 57 as designed. 246 chapters and 10 books listed, every other kind a 403 and a plain 404 by id;
+  a chapter's audio plays by range (206, 100 bytes); a voice's recording, a sample, the whole-book file, an uploaded
+  meeting recording, voice and book are all 404 to the TV and 200 to the launch token; `preview_book` and `read_chapter`
+  on a real book and chapter return their text; `job_status`, Mail, a recording status, `recall` and an unknown name are
+  403; `/api/state`, `/api/tools`, chat, delete and upload routes, `/api/events` are 403; a Host not on the list is 403.
+
 ## Deleting (2026-10-30)
 
 Three things the person can delete from the web app, each only by a button they press, each audited
@@ -595,9 +649,10 @@ re-reads its list every 30 seconds, so new mail shows without pressing Sync. It 
   failing and once when it recovers. A run never overlaps the one before it; a failure never stops the timer.
 
 Run for real: the first scheduled run after a rebuild, with no page involved, was a full re-sync (the
-mailbox's sync point had lapsed) that took 5 min 34 s and added 1,040 messages. **Not handled:** a sync pressed
-in Mail while the scheduled one runs reaches the same tool process at the same time, as two open tabs could
-before.
+mailbox's sync point had lapsed) that took 5 min 34 s and added 1,040 messages. A sync pressed in Mail while the
+scheduled one runs reaches the same tool process at the same time; since 2026-11-21 mail-ai answers the second with
+`already_running` (not an error, so the schedule does not count it a failure) and the page says "Already syncing".
+Before, it failed with "database is locked".
 
 ## Memory and history in the interface
 
